@@ -61,6 +61,7 @@ struct LibraryView: View {
                 }
             }
             .onAppear { pinchBase = columns }
+            .task(id: store.sortedNewest.count) { debugPresent() }
         }
     }
 
@@ -215,6 +216,23 @@ struct LibraryView: View {
 
     private func toggle(_ id: Int) {
         if selected.contains(id) { selected.remove(id) } else { selected.insert(id) }
+    }
+
+    @State private var debugDone = false
+    private func debugPresent() {
+        guard !debugDone, let s = DebugRoute.screen, !store.sortedNewest.isEmpty else { return }
+        debugDone = true
+        let ids = store.sortedNewest.map(\.id)
+        switch s {
+        case "viewer": viewer = ViewerTarget(ids: ids, index: 1)
+        case "viewer-video":
+            if let i = store.sortedNewest.firstIndex(where: \.isVideo) { viewer = ViewerTarget(ids: ids, index: i) }
+        case "classify": classifyIDs = IDList(ids: [ids[0]])
+        case "triage": showTriage = true
+        case "select": selecting = true; selected = Set(ids.prefix(4))
+        case "filtered": filter.cats[0] = store.cats(axis: 1).first.map { .id($0.id) } ?? .any
+        default: break
+        }
     }
 
     private func endSelection() {

@@ -1,0 +1,50 @@
+name: Screens
+
+# Simulator screenshots against a local demo server with generated neutral content.
+on:
+  workflow_dispatch:
+
+jobs:
+  shots:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | grep -viE "beta|_RC" | sort -V | tail -1)"
+      - name: 도구
+        run: brew install ffmpeg >/dev/null
+      - name: 데모 서버
+        run: |
+          python3 -m venv /tmp/venv
+          /tmp/venv/bin/pip install -q fastapi uvicorn aiosqlite httpx python-multipart
+          bash ios/ci/demo_library.sh /tmp/demo/lib
+          mkdir -p /tmp/demo/data
+          cd server
+          MOABOM_DATA_DIR=/tmp/demo/data MOABOM_LIBRARY=/tmp/demo/lib MOABOM_USER=demo MOABOM_PASS=demo-pass-1 \
+            nohup /tmp/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8977 > /tmp/server.log 2>&1 &
+          sleep 8
+          curl -fs http://127.0.0.1:8977/health
+          TOKEN=$(curl -fs http://127.0.0.1:8977/api/auth/login -H 'Content-Type: application/json' \
+            -d '{"username":"demo","password":"demo-pass-1","client":"app"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
+          curl -fs -X PUT http://127.0.0.1:8977/api/categories/axes -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+            -d '{"names":["주제","종류","분위기"]}'
+          curl -fs "http://127.0.0.1:8977/api/sync?since=0&limit=5" -H "Authorization: Bearer $TOKEN" | head -c 300
+      - name: 빌드
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild -project Moabom.xcodeproj -scheme Moabom -configuration Debug -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/dd CODE_SIGNING_ALLOWED=NO build \
+            2>&1 | tee build.log | grep -E "error:|BUILD" || true
+          grep -q "BUILD SUCCEEDED" build.log
+      - name: 스크린샷
+        run: bash ios/ci/shots.sh /tmp/dd/Build/Products/Debug-iphonesimulator/Moabom.app /tmp/shots
+      - name: 서버 로그
+        if: always()
+        run: tail -60 /tmp/server.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots
+          path: /tmp/shots

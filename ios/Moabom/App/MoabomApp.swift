@@ -40,10 +40,13 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
-            if !store.loggedIn {
+            if !store.loggedIn && DebugRoute.screen != nil {
+                ProgressView().task { await DebugRoute.prepare() }
+            } else if !store.loggedIn {
                 LoginView()
             } else {
                 MainTabs()
+                    .task { if DebugRoute.screen != nil { await DebugRoute.prepare() } }
                     .task {
                         while !Task.isCancelled {
                             await store.sync()
@@ -76,5 +79,11 @@ struct MainTabs: View {
             Tab("설정", systemImage: "gearshape", value: "settings") { SettingsView() }
         }
         .tabViewStyle(.sidebarAdaptable)
+        .onAppear {
+            if let s = DebugRoute.screen {
+                tab = ["feed": "feed", "downloads": "downloads", "watch": "downloads", "settings": "settings",
+                       "categories": "settings", "lock": "feed"][s] ?? "library"
+            }
+        }
     }
 }

@@ -31,18 +31,33 @@ enum SharedStore {
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
         var out: AnyObject?
-        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let d = out as? Data else { return nil }
+        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let d = out as? Data else {
+            #if targetEnvironment(simulator)
+            return UserDefaults.standard.string(forKey: "sim.\(key)")
+            #else
+            return nil
+            #endif
+        }
         return String(data: d, encoding: .utf8)
     }
 
     static func write(_ key: String, _ value: String?) {
         let q = baseQuery(key)
         SecItemDelete(q as CFDictionary)
+        #if targetEnvironment(simulator)
+        UserDefaults.standard.removeObject(forKey: "sim.\(key)")
+        #endif
         guard let value, let data = value.data(using: .utf8) else { return }
         var add = q
         add[kSecValueData as String] = data
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(add as CFDictionary, nil)
+        let status = SecItemAdd(add as CFDictionary, nil)
+        #if targetEnvironment(simulator)
+        // Unsigned simulator builds (CI screenshots) may have no keychain entitlement.
+        UserDefaults.standard.set(status == errSecSuccess ? nil : value, forKey: "sim.\(key)")
+        #else
+        _ = status
+        #endif
     }
 
     private static func baseQuery(_ key: String) -> [String: Any] {

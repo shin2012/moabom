@@ -27,7 +27,7 @@ struct DownloadsView: View {
             .navigationTitle("받기")
             .refreshable { await Task { await reload() }.value }
             .task { await poll() }
-            .onAppear { applyDefaults() }
+            .onAppear { applyDefaults(); if DebugRoute.screen == "watch" { section = 1 } }
         }
     }
 

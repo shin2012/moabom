@@ -70,6 +70,8 @@ final class AppLock: ObservableObject {
         }
     }
 
+    func lockNow() { if enabled && hasPasscode { locked = true } }
+
     func didEnterBackground() {
         backgroundedAt = Date()
         if enabled && timeoutSeconds == 0 { locked = true }

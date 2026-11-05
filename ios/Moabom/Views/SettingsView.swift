@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var settingPasscode = false
     @State private var confirmLogout = false
     @State private var confirmReset = false
+    @State private var showCategories = DebugRoute.screen == "categories"
 
     var body: some View {
         NavigationStack {
@@ -70,6 +71,7 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("설정")
+            .navigationDestination(isPresented: $showCategories) { CategoryManagerView() }
             .task { await refreshUsage() }
             .sheet(isPresented: $settingPasscode) { PasscodeSetupView() }
             .confirmationDialog("로그아웃할까요?", isPresented: $confirmLogout, titleVisibility: .visible) {
