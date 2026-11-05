@@ -47,6 +47,32 @@ jobs:
         run: |
           mkdir -p ~/private_keys
           printf '%s\n' "$ASC_KEY_P8" > ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
+      - name: 번들 ID 등록 (없으면)
+        run: |
+          pip3 install --break-system-packages -q pyjwt cryptography
+          python3 - <<'PY'
+          import json, os, time, urllib.request, urllib.error, jwt
+          kid, iss = os.environ["ASC_KEY_ID"], os.environ["ASC_ISSUER_ID"]
+          key = open(os.path.expanduser(f"~/private_keys/AuthKey_{kid}.p8")).read()
+          tok = jwt.encode({"iss": iss, "iat": int(time.time()), "exp": int(time.time()) + 600, "aud": "appstoreconnect-v1"},
+                           key, algorithm="ES256", headers={"kid": kid})
+          def req(url, body=None):
+              r = urllib.request.Request(url, data=json.dumps(body).encode() if body else None,
+                                         method="POST" if body else "GET",
+                                         headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"})
+              with urllib.request.urlopen(r) as f:
+                  return json.loads(f.read() or b"{}")
+          for ident, name in [("kr.b-612.moabom", "Moabom"), ("kr.b-612.moabom.share", "Moabom Share")]:
+              found = req(f"https://api.appstoreconnect.apple.com/v1/bundleIds?filter[identifier]={ident}")["data"]
+              if any(b["attributes"]["identifier"] == ident for b in found):
+                  print("있음", ident); continue
+              try:
+                  req("https://api.appstoreconnect.apple.com/v1/bundleIds",
+                      {"data": {"type": "bundleIds", "attributes": {"identifier": ident, "name": name, "platform": "IOS"}}})
+                  print("등록함", ident)
+              except urllib.error.HTTPError as e:
+                  print("등록 실패", ident, e.read()[:300])
+          PY
       - name: 지난 CI 인증서 정리 (개수 한도 방지)
         # Each ephemeral runner creates a new 'Created via API' cert whose private key dies with the runner;
         # after a few runs the account hits the cert limit ("Choose a certificate to revoke"). Delete only those.
