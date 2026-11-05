@@ -18,3 +18,17 @@ for d in "풍경/여름/산책" "풍경/겨울/산책" "풍경/여름" "동물/�
   done
 done
 find . -type f | wc -l
+# Bulk copies to reproduce real-library scale (thousands of items).
+if [ -n "${DEMO_BULK:-}" ]; then
+  mkdir -p "대량/모음"
+  src_v=$(find . -name '*.mp4' | head -1); src_i=$(find . -name 'photo*.jpg' | head -1)
+  for k in $(seq 1 "$DEMO_BULK"); do
+    stamp=$(printf "20250101%06d" "$k")
+    if [ $((k % 3)) = 0 ]; then
+      cp "$src_v" "대량/모음/bulk${k}_${stamp}_001.mp4"; cp "${src_v%.mp4}.jpg" "대량/모음/bulk${k}_${stamp}_001.jpg"
+    else
+      cp "$src_i" "대량/모음/bulkp${k}_${stamp}_001.jpg"
+    fi
+  done
+  find . -type f | wc -l
+fi

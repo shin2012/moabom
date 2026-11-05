@@ -3,6 +3,10 @@ name: Screens
 # Simulator screenshots against a local demo server with generated neutral content.
 on:
   workflow_dispatch:
+    inputs:
+      screens:
+        description: "찍을 화면 (공백 구분, 비우면 전체)"
+        default: ""
 
 jobs:
   shots:
@@ -18,7 +22,7 @@ jobs:
         run: |
           python3 -m venv /tmp/venv
           /tmp/venv/bin/pip install -q fastapi uvicorn aiosqlite httpx python-multipart
-          bash ios/ci/demo_library.sh /tmp/demo/lib
+          DEMO_BULK=3400 bash ios/ci/demo_library.sh /tmp/demo/lib
           mkdir -p /tmp/demo/data
           cd server
           MOABOM_DATA_DIR=/tmp/demo/data MOABOM_LIBRARY=/tmp/demo/lib MOABOM_USER=demo MOABOM_PASS=demo-pass-1 \
@@ -39,6 +43,8 @@ jobs:
             2>&1 | tee build.log | grep -E "error:|BUILD" || true
           grep -q "BUILD SUCCEEDED" build.log
       - name: 스크린샷
+        env:
+          SCREENS: ${{ inputs.screens }}
         run: bash ios/ci/shots.sh /tmp/dd/Build/Products/Debug-iphonesimulator/Moabom.app /tmp/shots
       - name: 서버 로그
         if: always()

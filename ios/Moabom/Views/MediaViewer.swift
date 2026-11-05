@@ -13,24 +13,40 @@ struct MediaViewer: View {
     @State private var confirmDelete = false
 
     private var current: MediaItem? { ids[safe: index].flatMap { store.media[$0] } }
+    @State private var currentID: Int?
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
                 .opacity(1 - min(0.6, abs(dragY) / 600))
-            TabView(selection: $index) {
-                ForEach(Array(ids.enumerated()), id: \.offset) { i, id in
-                    Group {
-                        if let m = store.media[id] {
-                            ViewerPage(item: m, active: i == index)
-                        } else {
-                            Text("삭제된 항목").foregroundStyle(.secondary)
+            // Lazy horizontal pager: only visible pages are built (a page TabView builds every page up front,
+            // which froze/crashed the app with thousands of items).
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) {
+                    LazyHStack(spacing: 0) {
+                        ForEach(ids, id: \.self) { id in
+                            Group {
+                                if let m = store.media[id] {
+                                    ViewerPage(item: m, active: id == currentID)
+                                } else {
+                                    Text("삭제된 항목").foregroundStyle(.secondary)
+                                }
+                            }
+                            .containerRelativeFrame([.horizontal, .vertical])
+                            .id(id)
                         }
                     }
-                    .tag(i)
+                    .scrollTargetLayout()
+                }
+                .scrollTargetBehavior(.paging)
+                .scrollPosition(id: $currentID)
+                .scrollIndicators(.hidden)
+                .onAppear {
+                    let start = ids[safe: index]
+                    currentID = start
+                    if let start { proxy.scrollTo(start, anchor: .leading) }
                 }
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
             .ignoresSafeArea()
             .offset(y: max(0, dragY))
             .simultaneousGesture(
@@ -65,7 +81,9 @@ struct MediaViewer: View {
         .confirmationDialog("NAS에서 완전히 삭제할까요?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("삭제", role: .destructive) { deleteCurrent() }
         }
-        .onChange(of: index) { _, i in prefetch(around: i) }
+        .onChange(of: currentID) { _, id in
+            if let id, let i = ids.firstIndex(of: id) { index = i; prefetch(around: i) }
+        }
         .onAppear { prefetch(around: index) }
     }
 
