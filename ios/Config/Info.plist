@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>모아봄</string>
+	<key>SharedKeychainGroup</key>
+	<string>$(AppIdentifierPrefix)kr.b-612.moabom.shared</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>NSFaceIDUsageDescription</key>
+	<string>모아봄 잠금을 해제할 때 사용해요.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>영상과 사진을 사진 앱에 저장할 때 사용해요.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
+</dict>
+</plist>

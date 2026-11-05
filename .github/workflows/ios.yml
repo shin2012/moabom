@@ -1,0 +1,110 @@
+name: iOS
+
+on:
+  push:
+    paths: ["ios/**", ".github/workflows/ios.yml"]
+  workflow_dispatch:
+    inputs:
+      testflight:
+        description: "TestFlight에 올리기"
+        type: boolean
+        default: true
+
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | grep -viE "beta|_RC" | sort -V | tail -1)"
+      - name: 빌드 (시뮬레이터, 서명 없음)
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild -project Moabom.xcodeproj -scheme Moabom \
+            -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build 2>&1 | tee build.log | grep -E "error:|warning:|BUILD" || true
+          grep -q "BUILD SUCCEEDED" build.log
+
+  testflight:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.testflight
+    runs-on: macos-26
+    timeout-minutes: 40
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | grep -viE "beta|_RC" | sort -V | tail -1)"
+      - name: API 키
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          mkdir -p ~/private_keys
+          printf '%s\n' "$ASC_KEY_P8" > ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
+      - name: 지난 CI 인증서 정리 (개수 한도 방지)
+        # Each ephemeral runner creates a new 'Created via API' cert whose private key dies with the runner;
+        # after a few runs the account hits the cert limit ("Choose a certificate to revoke"). Delete only those.
+        run: |
+          pip3 install --break-system-packages -q pyjwt cryptography
+          python3 - <<'PY'
+          import json, os, time, urllib.request, jwt
+          kid, iss = os.environ["ASC_KEY_ID"], os.environ["ASC_ISSUER_ID"]
+          key = open(os.path.expanduser(f"~/private_keys/AuthKey_{kid}.p8")).read()
+          tok = jwt.encode({"iss": iss, "iat": int(time.time()), "exp": int(time.time()) + 600, "aud": "appstoreconnect-v1"},
+                           key, algorithm="ES256", headers={"kid": kid})
+          def req(url, method="GET"):
+              r = urllib.request.Request(url, method=method, headers={"Authorization": f"Bearer {tok}"})
+              with urllib.request.urlopen(r) as f:
+                  b = f.read()
+                  return json.loads(b) if b else {}
+          for c in req("https://api.appstoreconnect.apple.com/v1/certificates?limit=200")["data"]:
+              a = c["attributes"]
+              print(a["certificateType"], a["name"], a.get("displayName"), a["expirationDate"][:10])
+              if "Created via API" in (a.get("name") or "") + (a.get("displayName") or ""):
+                  req(f"https://api.appstoreconnect.apple.com/v1/certificates/{c['id']}", "DELETE")
+                  print("  -> 지움")
+          PY
+      - name: 아카이브 (자동 서명)
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild -project Moabom.xcodeproj -scheme Moabom -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath $RUNNER_TEMP/App.xcarchive \
+            DEVELOPMENT_TEAM=$TEAM_ID CODE_SIGN_STYLE=Automatic \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${ASC_KEY_ID}.p8 \
+            -authenticationKeyID $ASC_KEY_ID -authenticationKeyIssuerID $ASC_ISSUER_ID \
+            archive 2>&1 | tee archive.log | grep -E "error:|ARCHIVE" || true
+          grep -q "ARCHIVE SUCCEEDED" archive.log
+      - name: IPA 만들기
+        run: |
+          cat > $RUNNER_TEMP/export.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>export</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          EOF
+          xcodebuild -exportArchive -archivePath $RUNNER_TEMP/App.xcarchive \
+            -exportOptionsPlist $RUNNER_TEMP/export.plist -exportPath $RUNNER_TEMP/export \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${ASC_KEY_ID}.p8 \
+            -authenticationKeyID $ASC_KEY_ID -authenticationKeyIssuerID $ASC_ISSUER_ID
+      - name: App Store Connect 앱 목록 (진단)
+        continue-on-error: true
+        run: xcrun altool --list-apps --apiKey $ASC_KEY_ID --apiIssuer $ASC_ISSUER_ID 2>&1 | head -40
+      - name: TestFlight 업로드
+        run: |
+          xcrun altool --upload-app -t ios -f "$(ls $RUNNER_TEMP/export/*.ipa | head -1)" \
+            --apiKey $ASC_KEY_ID --apiIssuer $ASC_ISSUER_ID --show-progress
