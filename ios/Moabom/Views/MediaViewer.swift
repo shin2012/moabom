@@ -49,18 +49,13 @@ struct MediaViewer: View {
             }
             .ignoresSafeArea()
             .offset(y: max(0, dragY))
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 24)
-                    .onChanged { v in
-                        if abs(v.translation.height) > abs(v.translation.width) * 1.4 { dragY = v.translation.height }
-                    }
-                    .onEnded { v in
-                        let h = v.translation.height, w = v.translation.width
-                        if abs(h) > abs(w) * 1.4 {
-                            if h > 120 { dismiss() } else if h < -90, let m = current { classifyIDs = [m.id] }
-                        }
-                        withAnimation(.spring(duration: 0.25)) { dragY = 0 }
-                    }
+            .gesture(
+                DirectionalPan(direction: .vertical,
+                               onChanged: { t in dragY = t.height },
+                               onEnded: { t in
+                                   if t.height > 120 { dismiss() } else if t.height < -90, let m = current { classifyIDs = [m.id] }
+                                   withAnimation(.spring(duration: 0.25)) { dragY = 0 }
+                               })
             )
             .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { chrome.toggle() } }
 

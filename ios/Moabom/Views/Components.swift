@@ -53,12 +53,15 @@ struct ZoomableImage: View {
                     lastScale = scale
                     if scale <= 1.01 { withAnimation { offset = .zero; lastOffset = .zero; scale = 1; lastScale = 1 } }
                 }
-                .simultaneously(with: DragGesture(minimumDistance: scale > 1 ? 0 : 10_000)
-                    .onChanged { v in
-                        guard scale > 1 else { return }
-                        offset = CGSize(width: lastOffset.width + v.translation.width, height: lastOffset.height + v.translation.height)
-                    }
-                    .onEnded { _ in lastOffset = offset })
+        )
+        // Pan only while zoomed in, so it never steals swipes from the surrounding pager/feed.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { v in
+                    offset = CGSize(width: lastOffset.width + v.translation.width, height: lastOffset.height + v.translation.height)
+                }
+                .onEnded { _ in lastOffset = offset },
+            isEnabled: scale > 1
         )
         .onTapGesture(count: 2) {
             withAnimation(.spring) {

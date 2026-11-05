@@ -129,7 +129,6 @@ private struct FeedPage: View {
     @State private var paused = false
     // scrubbing
     @State private var scrubbing = false
-    @State private var dragAxis: Axis?
     @State private var scrubStart: Double = 0
     @State private var wasPlaying = false
 
@@ -147,24 +146,18 @@ private struct FeedPage: View {
                         paused.toggle()
                         paused ? player.pause() : player.play()
                     }
-                    // Drag sideways anywhere on the video to skim back and forth.
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: 10)
-                            .onChanged { v in
-                                if dragAxis == nil {
-                                    dragAxis = abs(v.translation.width) > abs(v.translation.height) * 1.2 ? .horizontal : .vertical
-                                    if dragAxis == .horizontal { beginScrub(at: player.currentSeconds) }
-                                }
-                                guard dragAxis == .horizontal, player.ready else { return }
-                                let d = player.knownDuration
-                                // Whole clip across one screen width (capped at 3 minutes per width for long videos).
-                                let secondsPerPoint = min(d, 180) / max(1, geo.size.width)
-                                player.scrub(to: scrubStart + Double(v.translation.width) * secondsPerPoint)
-                            }
-                            .onEnded { _ in
-                                if dragAxis == .horizontal { endScrub() }
-                                dragAxis = nil
-                            }
+                    // Drag sideways anywhere on the video to skim back and forth (vertical drags still page the feed).
+                    .gesture(
+                        DirectionalPan(direction: .horizontal,
+                                       onBegan: { beginScrub(at: player.currentSeconds) },
+                                       onChanged: { t in
+                                           guard player.ready else { return }
+                                           let d = player.knownDuration
+                                           // Whole clip across one screen width (capped at 3 minutes per width for long videos).
+                                           let secondsPerPoint = min(d, 180) / max(1, geo.size.width)
+                                           player.scrub(to: scrubStart + Double(t.width) * secondsPerPoint)
+                                       },
+                                       onEnded: { _ in endScrub() })
                     )
                     .overlay {
                         if paused && !scrubbing {
