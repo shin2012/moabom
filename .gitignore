@@ -1,0 +1,20 @@
+.env
+*.env
+!.env.example
+data/
+library/
+certs/
+*.db
+*.db-*
+cookies*.txt
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+# iOS
+ios/build/
+*.xcuserstate
+xcuserdata/
+DerivedData/
+*.p8
+*.ipa

@@ -1,0 +1,15 @@
+services:
+  moabom:
+    build: ./server
+    container_name: moabom
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - TZ=Asia/Seoul
+    ports:
+      - "${MOABOM_PORT:-8900}:8443"
+    volumes:
+      - ./data:/app/data
+      - ${MOABOM_LIBRARY_HOST:-./library}:/downloads
+      - ${MOABOM_CERT_DIR:-./certs}:/certs:ro
+    mem_limit: 768m

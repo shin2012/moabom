@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f0f10">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>모아봄</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="login" class="login hidden">
+  <form class="login-box" onsubmit="event.preventDefault(); doLogin()">
+    <h1>모아봄</h1>
+    <input id="loginUser" autocomplete="username" placeholder="아이디">
+    <input id="loginPass" type="password" autocomplete="current-password" placeholder="비밀번호">
+    <button class="btn primary" type="submit">로그인</button>
+    <p id="loginErr" class="err"></p>
+  </form>
+</div>
+
+<div id="app" class="hidden">
+  <header class="top">
+    <div class="brand">모아봄</div>
+    <nav class="tabs" id="tabs">
+      <button data-tab="library" class="on">보관함</button>
+      <button data-tab="feed">둘러보기</button>
+      <button data-tab="downloads">받기</button>
+      <button data-tab="watch">감시</button>
+      <button data-tab="settings">설정</button>
+      <button data-tab="stats">통계</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- 보관함 -->
+    <section id="tab-library" class="tab on">
+      <div class="filters" id="libFilters"></div>
+      <div class="sel-bar hidden" id="selBar">
+        <span id="selCount">0개 선택</span>
+        <button class="btn" onclick="selectAllVisible()">전체 선택</button>
+        <button class="btn" onclick="openClassify(selectedIds())">분류 변경</button>
+        <button class="btn danger" onclick="deleteIds(selectedIds())">삭제</button>
+        <button class="btn ghost" onclick="exitSelect()">취소</button>
+      </div>
+      <div class="grid" id="grid"></div>
+      <div class="more" id="libMore"></div>
+    </section>
+
+    <!-- 둘러보기 -->
+    <section id="tab-feed" class="tab">
+      <div class="feed" id="feed"></div>
+    </section>
+
+    <!-- 받기 -->
+    <section id="tab-downloads" class="tab">
+      <div class="card">
+        <div class="row">
+          <input id="urlInput" placeholder="링크 붙여넣기 (X 게시물 등)" onkeydown="if(event.key==='Enter')submitDownload()">
+          <button class="btn primary" onclick="submitDownload()">받기</button>
+        </div>
+        <div class="cat-pick" id="dlCats"></div>
+      </div>
+      <div class="list-head">
+        <h3>최근 받은 항목</h3>
+        <div>
+          <button class="btn ghost sm" onclick="clearDownloads('completed')">완료 정리</button>
+          <button class="btn ghost sm" onclick="clearDownloads('failed')">실패 정리</button>
+        </div>
+      </div>
+      <div id="dlList" class="list"></div>
+    </section>
+
+    <!-- 감시 -->
+    <section id="tab-watch" class="tab">
+      <div class="card row">
+        <input id="watchInput" placeholder="X 계정 (@이름)" onkeydown="if(event.key==='Enter')addWatch()">
+        <button class="btn primary" onclick="addWatch()">추가</button>
+      </div>
+      <div class="card" id="likesCard"></div>
+      <div id="watchList" class="list"></div>
+    </section>
+
+    <!-- 설정 -->
+    <section id="tab-settings" class="tab">
+      <div class="card">
+        <h3>분류 관리</h3>
+        <p class="hint">분류를 바꾸면 NAS의 폴더도 함께 바뀝니다. 끌어서 순서를 바꿀 수 있습니다.</p>
+        <div id="catManager"></div>
+      </div>
+      <div class="card">
+        <h3>X 로그인</h3>
+        <div id="xStatus"></div>
+        <div class="row"><input id="xToken" placeholder="auth_token"><input id="xCt0" placeholder="ct0 (선택)">
+          <button class="btn" onclick="saveXToken()">저장</button></div>
+        <div class="row"><input id="xUser" placeholder="내 X 계정 이름 (좋아요 감시용)"><button class="btn" onclick="saveXUser()">저장</button></div>
+      </div>
+      <div class="card">
+        <h3>로그인된 기기</h3>
+        <div id="devices" class="list"></div>
+      </div>
+      <div class="card">
+        <h3>활동 기록</h3>
+        <div id="logs" class="list small"></div>
+      </div>
+      <div class="card row">
+        <button class="btn" onclick="rescan()">라이브러리 다시 읽기</button>
+        <button class="btn danger" onclick="logout()">로그아웃</button>
+      </div>
+    </section>
+
+    <!-- 통계 -->
+    <section id="tab-stats" class="tab"><div id="stats"></div></section>
+  </main>
+</div>
+
+<!-- viewer -->
+<div id="viewer" class="viewer hidden" onclick="if(event.target===this)closeViewer()">
+  <button class="v-close" onclick="closeViewer()">✕</button>
+  <button class="v-nav prev" onclick="stepViewer(-1)">‹</button>
+  <div class="v-body" id="vBody"></div>
+  <button class="v-nav next" onclick="stepViewer(1)">›</button>
+  <div class="v-info" id="vInfo"></div>
+</div>
+
+<!-- classify sheet -->
+<div id="sheet" class="sheet-wrap hidden" onclick="if(event.target===this)closeSheet()">
+  <div class="sheet">
+    <h3 id="sheetTitle">분류 변경</h3>
+    <div id="sheetBody"></div>
+    <div class="row end">
+      <button class="btn ghost" onclick="closeSheet()">닫기</button>
+      <button class="btn primary" id="sheetOk">적용</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+<script src="/app.js"></script>
+</body>
+</html>
