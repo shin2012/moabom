@@ -49,6 +49,7 @@ struct LibraryView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbar(list) }
             .safeAreaInset(edge: .bottom) { if selecting { selectionBar } }
+            .toolbar(selecting ? .hidden : .automatic, for: .tabBar)
             .sheet(item: $classifyIDs) { l in
                 ClassifySheet(ids: l.ids) { endSelection() }.environmentObject(store)
             }
@@ -142,7 +143,7 @@ struct LibraryView: View {
             ToolbarItem(placement: .topBarTrailing) { Button("완료") { endSelection() } }
         } else {
             ToolbarItem(placement: .topBarLeading) {
-                Button { showTriage = true } label: { Label("정리", systemImage: "rectangle.stack.badge.plus") }
+                Button("정리") { showTriage = true }
             }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 filterMenu

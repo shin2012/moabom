@@ -10,6 +10,7 @@ from app import auth, config, db, dlqueue, events, library, watcher
 from app.routes import auth_routes, category_routes, download_routes, library_routes, misc_routes
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger("moabom")
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")

@@ -15,8 +15,8 @@ struct DownloadsView: View {
         NavigationStack {
             List {
                 Picker("", selection: $section) {
-                    Text("받기").tag(0)
-                    Text("감시").tag(1)
+                    Text("링크로 받기").tag(0)
+                    Text("자동 감시").tag(1)
                 }
                 .pickerStyle(.segmented)
                 .listRowBackground(Color.clear)

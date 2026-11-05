@@ -8,6 +8,7 @@ struct ClassifySheet: View {
     @EnvironmentObject var store: Store
     @Environment(\.dismiss) private var dismiss
     @State private var busy = false
+    @State private var applied: [Int: Int?] = [:]   // multi-select: what was applied per axis
 
     private var single: MediaItem? { ids.count == 1 ? store.media[ids[0]] : nil }
 
@@ -61,9 +62,13 @@ struct ClassifySheet: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(store.axes[safe: axis - 1] ?? "분류 \(axis)").font(.caption).foregroundStyle(.secondary)
                 FlowLayout {
-                    Chip(title: "미분류", dimmed: true) { apply([key: nil]) }
+                    Chip(title: "미분류", selected: applied[axis] == .some(nil), dimmed: true) {
+                        applied[axis] = .some(nil); apply([key: nil])
+                    }
                     ForEach(options, id: \.id) { o in
-                        Chip(title: o.name) { apply([key: o.id]) }
+                        Chip(title: o.name, selected: applied[axis] == .some(o.id)) {
+                            applied[axis] = .some(o.id); apply([key: o.id])
+                        }
                     }
                 }
             }
