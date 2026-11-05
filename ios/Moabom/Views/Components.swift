@@ -153,6 +153,56 @@ final class LoopingPlayer: ObservableObject {
 
     func play() { player.play() }
 
+    // MARK: scrubbing (Final Cut–style skimming: drag distance maps to time)
+    @Published var progress: Double = 0          // 0...1, updated while playing
+    private var timeObserver: Any?
+    private var seekInFlight = false
+    private var pendingSeek: Double?
+
+    var knownDuration: Double {
+        let d = player.currentItem?.duration.seconds ?? 0
+        return d.isFinite && d > 0 ? d : duration
+    }
+
+    var currentSeconds: Double {
+        let t = player.currentTime().seconds
+        return t.isFinite ? t : 0
+    }
+
+    func observeProgress() {
+        guard timeObserver == nil else { return }
+        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.2, preferredTimescale: 600), queue: .main) { [weak self] t in
+            MainActor.assumeIsolated {
+                guard let self, self.pendingSeek == nil, !self.seekInFlight else { return }
+                let d = self.knownDuration
+                if d > 0 { self.progress = min(1, max(0, t.seconds / d)) }
+            }
+        }
+    }
+
+    /// Frame-accurate seek that never queues more than one request (chase-seek), so dragging stays smooth.
+    func scrub(to seconds: Double) {
+        let d = knownDuration
+        let target = d > 0 ? min(max(0, seconds), d - 0.05) : max(0, seconds)
+        if d > 0 { progress = target / d }
+        pendingSeek = target
+        guard !seekInFlight else { return }
+        runPendingSeek()
+    }
+
+    private func runPendingSeek() {
+        guard let s = pendingSeek else { return }
+        pendingSeek = nil
+        seekInFlight = true
+        player.seek(to: CMTime(seconds: s, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.seekInFlight = false
+                if self.pendingSeek != nil { self.runPendingSeek() }
+            }
+        }
+    }
+
     func pause() {
         player.pause()
         if let id = itemID {
@@ -162,8 +212,10 @@ final class LoopingPlayer: ObservableObject {
 
     func stop() {
         pause()
+        if let o = timeObserver { player.removeTimeObserver(o); timeObserver = nil }
         player.removeAllItems()
         looper = nil
         itemID = nil
+        progress = 0
     }
 }
