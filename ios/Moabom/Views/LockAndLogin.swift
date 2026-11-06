@@ -30,7 +30,7 @@ struct LockView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black.ignoresSafeArea())
-        .task { await lock.unlockWithBiometrics() }
+        .task { await lock.autoPrompt() }
     }
 }
 

@@ -1,3 +1,4 @@
+import Combine
 import AVKit
 import SwiftUI
 
@@ -136,6 +137,27 @@ final class LoopingPlayer: ObservableObject {
     private var itemID: Int?
     private var duration: Double = 0
     @Published var ready = false
+    /// What the UI asked for; actual playback also needs AppLock.playbackAllowed.
+    private var wantsPlay = false
+    private var gate: AnyCancellable?
+
+    init() {
+        let lock = AppLock.shared
+        gate = Publishers.CombineLatest(lock.$locked, lock.$inForeground)
+            .map { !$0 && $1 }
+            .removeDuplicates()
+            .sink { [weak self] allowed in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if allowed {
+                        if self.wantsPlay { self.player.play() }
+                    } else {
+                        self.player.pause()
+                        if !lock.inForeground { self.player.isMuted = true }
+                    }
+                }
+            }
+    }
 
     func load(_ item: MediaItem, resume: Bool) async {
         guard itemID != item.id else { return }
@@ -154,7 +176,10 @@ final class LoopingPlayer: ObservableObject {
         ready = true
     }
 
-    func play() { player.play() }
+    func play() {
+        wantsPlay = true
+        if AppLock.shared.playbackAllowed { player.play() }
+    }
 
     // MARK: scrubbing (Final Cut–style skimming: drag distance maps to time)
     @Published var progress: Double = 0          // 0...1, updated while playing
@@ -207,6 +232,7 @@ final class LoopingPlayer: ObservableObject {
     }
 
     func pause() {
+        wantsPlay = false
         player.pause()
         if let id = itemID {
             PlaybackMemory.save(id, player.currentTime().seconds, duration: duration)

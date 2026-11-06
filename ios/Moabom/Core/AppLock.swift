@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import LocalAuthentication
 import SwiftUI
+import UIKit
 
 /// App lock: own 6-digit passcode + Face ID / Touch ID.
 @MainActor
@@ -9,16 +10,27 @@ final class AppLock: ObservableObject {
     static let shared = AppLock()
 
     @Published private(set) var locked: Bool
+    /// False while the app is in the background; players pause and mute on the way out.
+    @Published private(set) var inForeground = true
     @AppStorage("lockEnabled") var enabled = false
     @AppStorage("lockBiometrics") var useBiometrics = true
     @AppStorage("lockTimeout") var timeoutSeconds = 0    // 0 = 즉시
+    /// Set only by a real trip to the background; cleared on return so inactive→active
+    /// transitions (Face ID sheet, Control Center, notification shade) never re-lock.
     private var backgroundedAt: Date?
+    private var authenticating = false
+    /// Offer Face ID automatically once per launch / return from background (not after a cancel).
+    private var autoPromptPending: Bool
 
     static let timeoutOptions: [(Int, String)] = [(0, "즉시"), (60, "1분 후"), (300, "5분 후"), (900, "15분 후"), (3600, "1시간 후")]
 
     init() {
         locked = UserDefaults.standard.bool(forKey: "lockEnabled")
+        autoPromptPending = locked
     }
+
+    /// Video may make sound / play only when unlocked and on screen.
+    var playbackAllowed: Bool { !locked && inForeground }
 
     var hasPasscode: Bool { SharedStore.read("passcode") != nil }
 
@@ -61,7 +73,10 @@ final class AppLock: ObservableObject {
     }
 
     func unlockWithBiometrics() async {
-        guard enabled, useBiometrics, locked else { return }
+        guard enabled, useBiometrics, locked, !authenticating,
+              UIApplication.shared.applicationState == .active else { return }
+        authenticating = true
+        defer { authenticating = false }
         let c = LAContext()
         c.localizedFallbackTitle = "암호 입력"
         guard c.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil) else { return }
@@ -74,12 +89,31 @@ final class AppLock: ObservableObject {
 
     func didEnterBackground() {
         backgroundedAt = Date()
+        inForeground = false
+        // Sound always starts off when the user comes back.
+        UserDefaults.standard.set(true, forKey: "feedMuted")
         if enabled && timeoutSeconds == 0 { locked = true }
     }
 
+    /// Called on every scenePhase == .active, which also fires after inactive-only interruptions.
     func willEnterForeground() {
-        guard enabled, hasPasscode else { locked = false; return }
-        if let t = backgroundedAt, Date().timeIntervalSince(t) >= Double(timeoutSeconds) { locked = true }
+        let returning = backgroundedAt
+        backgroundedAt = nil
+        if !enabled || !hasPasscode {
+            locked = false
+        } else if let t = returning {
+            if Date().timeIntervalSince(t) >= Double(timeoutSeconds) { locked = true }
+            if locked { autoPromptPending = true }
+        }
+        inForeground = true
+        Task { await autoPrompt() }
+    }
+
+    /// Face ID once per launch/return; a cancelled prompt is not re-shown (button stays available).
+    func autoPrompt() async {
+        guard locked, autoPromptPending, UIApplication.shared.applicationState == .active else { return }
+        autoPromptPending = false
+        await unlockWithBiometrics()
     }
 }
 

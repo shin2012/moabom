@@ -8,6 +8,7 @@ struct MoabomApp: App {
     @Environment(\.scenePhase) private var phase
 
     init() {
+        UserDefaults.standard.set(true, forKey: "feedMuted")   // every launch starts muted
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
         if UserDefaults.standard.object(forKey: MediaCache.limitKey) == nil {
             UserDefaults.standard.set(5.0, forKey: MediaCache.limitKey)
