@@ -25,8 +25,9 @@ final class AppLock: ObservableObject {
     static let timeoutOptions: [(Int, String)] = [(0, "즉시"), (60, "1분 후"), (300, "5분 후"), (900, "15분 후"), (3600, "1시간 후")]
 
     init() {
-        locked = UserDefaults.standard.bool(forKey: "lockEnabled")
-        autoPromptPending = locked
+        let on = UserDefaults.standard.bool(forKey: "lockEnabled")
+        locked = on
+        autoPromptPending = on
     }
 
     /// Video may make sound / play only when unlocked and on screen.
