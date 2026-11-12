@@ -41,7 +41,7 @@
         <span id="selCount">0개 선택</span>
         <button class="btn" onclick="selectAllVisible()">전체 선택</button>
         <button class="btn" onclick="openClassify(selectedIds())">분류 변경</button>
-        <button class="btn danger" onclick="deleteIds(selectedIds())">삭제</button>
+        <button class="btn danger" onclick="twoTap(this, () => deleteIds(selectedIds()))">🗑 삭제</button>
         <button class="btn ghost" onclick="exitSelect()">취소</button>
       </div>
       <div class="grid" id="grid"></div>

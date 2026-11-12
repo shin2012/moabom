@@ -9,7 +9,6 @@ struct LibraryView: View {
     @State private var selected: Set<Int> = []
     @State private var viewer: ViewerTarget?
     @State private var classifyIDs: IDList?
-    @State private var confirmDelete = false
     @State private var showTriage = false
     @Environment(\.horizontalSizeClass) private var hSize
 
@@ -55,12 +54,6 @@ struct LibraryView: View {
             }
             .fullScreenCover(item: $viewer) { v in MediaViewer(ids: v.ids, index: v.index).environmentObject(store) }
             .fullScreenCover(isPresented: $showTriage) { TriageView().environmentObject(store) }
-            .confirmationDialog("\(selected.count)개를 NAS에서 완전히 삭제할까요?", isPresented: $confirmDelete, titleVisibility: .visible) {
-                Button("삭제", role: .destructive) {
-                    let ids = Array(selected)
-                    Task { if await store.delete(ids) { endSelection() } }
-                }
-            }
             .onAppear { pinchBase = columns }
             .task(id: store.sortedNewest.count) { debugPresent() }
         }
@@ -201,7 +194,10 @@ struct LibraryView: View {
                 let ids = Array(selected)
                 Task { for id in ids where store.media[id]?.isFavorite == false { await store.toggleFavorite(id) }; endSelection() }
             }
-            selButton("trash", "삭제", role: .destructive) { confirmDelete = true }
+            ConfirmDeleteButton(title: selected.isEmpty ? "삭제" : "\(selected.count)개 삭제", resetKey: selected) {
+                let ids = Array(selected)
+                Task { if await store.delete(ids) { endSelection() } }
+            }
         }
         .disabled(selected.isEmpty)
         .padding(.vertical, 10)

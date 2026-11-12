@@ -248,3 +248,79 @@ final class LoopingPlayer: ObservableObject {
         progress = 0
     }
 }
+
+
+/// Two-tap delete: the first tap arms the button in place (red fill, draining
+/// timer bar, warning haptic); a second tap on the same spot within 3 s runs
+/// the action. Disarms on timeout or whenever `resetKey` changes.
+struct ConfirmDeleteButton<Key: Equatable>: View {
+    var title = "삭제"
+    var armedTitle = "한 번 더 탭"
+    var idleColor: Color = .red
+    let resetKey: Key
+    let action: () -> Void
+
+    @State private var armed = false
+    @State private var remaining: CGFloat = 1
+    @State private var token = 0
+    @Environment(\.isEnabled) private var isEnabled
+    private let window: Double = 3
+
+    var body: some View {
+        Button {
+            if armed { disarm(); action() } else { arm() }
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: armed ? "trash.fill" : "trash").font(.title3)
+                Text(armed ? armedTitle : title)
+                    .font(.caption2.weight(armed ? .bold : .regular))
+                    .lineLimit(1).minimumScaleFactor(0.7)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .foregroundStyle(armed ? Color.white : (isEnabled ? idleColor : Color.secondary))
+            .background {
+                if armed {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.red)
+                        .overlay(alignment: .bottomLeading) {
+                            GeometryReader { g in
+                                Capsule().fill(.white.opacity(0.8))
+                                    .frame(width: g.size.width * remaining, height: 3)
+                            }
+                            .frame(height: 3)
+                            .padding(.horizontal, 10).padding(.bottom, 4)
+                        }
+                        .transition(.scale(scale: 0.85).combined(with: .opacity))
+                }
+            }
+            .padding(.horizontal, 6)
+            .contentShape(Rectangle())
+            .scaleEffect(armed ? 1.05 : 1)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(armed ? "한 번 더 누르면 삭제" : title)
+        .sensoryFeedback(.warning, trigger: armed) { _, new in new }
+        .onChange(of: resetKey) { _, _ in disarm() }
+        .onChange(of: isEnabled) { _, on in if !on { disarm() } }
+        .onDisappear { disarm() }
+    }
+
+    private func arm() {
+        token += 1
+        let t = token
+        remaining = 1
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) { armed = true }
+        withAnimation(.linear(duration: window)) { remaining = 0 }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(window))
+            if token == t { disarm() }
+        }
+    }
+
+    private func disarm() {
+        guard armed else { return }
+        token += 1
+        withAnimation(.easeOut(duration: 0.2)) { armed = false }
+    }
+}

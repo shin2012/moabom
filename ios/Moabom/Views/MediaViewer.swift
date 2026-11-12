@@ -10,7 +10,6 @@ struct MediaViewer: View {
     @State private var chrome = true
     @State private var classifyIDs: [Int]?
     @State private var dragY: CGFloat = 0
-    @State private var confirmDelete = false
 
     private var current: MediaItem? { ids[safe: index].flatMap { store.media[$0] } }
     @State private var currentID: Int?
@@ -73,9 +72,6 @@ struct MediaViewer: View {
         .sheet(item: Binding(get: { classifyIDs.map { IDList(ids: $0) } }, set: { classifyIDs = $0?.ids })) { l in
             ClassifySheet(ids: l.ids).environmentObject(store)
         }
-        .confirmationDialog("NAS에서 완전히 삭제할까요?", isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("삭제", role: .destructive) { deleteCurrent() }
-        }
         .onChange(of: currentID) { _, id in
             if let id, let i = ids.firstIndex(of: id) { index = i; prefetch(around: i) }
         }
@@ -111,7 +107,7 @@ struct MediaViewer: View {
                 if let s = m.sourceUrl, let u = URL(string: s) {
                     barButton("safari", "원본") { UIApplication.shared.open(u) }
                 }
-                barButton("trash", "삭제") { confirmDelete = true }
+                ConfirmDeleteButton(idleColor: .white, resetKey: m.id) { deleteCurrent() }
             }
         }
         .padding(.horizontal, 18)

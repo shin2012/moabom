@@ -136,7 +136,27 @@ function enterSelect() { state.selecting = true; $('#selBar').classList.remove('
 function exitSelect() { state.selecting = false; state.selected.clear(); $$('.cell.sel').forEach(c => c.classList.remove('sel')); $('#selBar').classList.add('hidden'); }
 function toggleSel(id, cell) { state.selected.has(id) ? state.selected.delete(id) : state.selected.add(id); cell.classList.toggle('sel', state.selected.has(id)); updateSelBar(); }
 function selectAllVisible() { state.items.forEach(m => state.selected.add(m.id)); $$('.cell').forEach(c => c.classList.add('sel')); updateSelBar(); }
-function updateSelBar() { $('#selCount').textContent = `${state.selected.size}개 선택`; }
+function updateSelBar() { $('#selCount').textContent = `${state.selected.size}개 선택`; disarmAll(); }
+
+// ───── two-tap delete: 1st tap arms in place, 2nd tap on the same spot within 3 s confirms ─────
+const ARM_MS = 3000;
+function disarm(btn) {
+  if (!btn.classList.contains('armed')) return;
+  clearTimeout(btn._armT); btn.classList.remove('armed');
+  btn.innerHTML = btn.dataset.idle; btn.style.minWidth = '';
+}
+function disarmAll() { $$('.btn.armed').forEach(disarm); }
+function twoTap(btn, run, label = '한 번 더 눌러 삭제') {
+  if (btn.classList.contains('armed')) { disarm(btn); run(); return; }
+  disarmAll();
+  btn.dataset.idle = btn.innerHTML;
+  btn.style.minWidth = btn.offsetWidth + 'px';
+  btn.innerHTML = `<span>${label}</span>`;
+  btn.classList.add('armed');
+  btn._armT = setTimeout(() => disarm(btn), ARM_MS);
+  navigator.vibrate?.(20);
+}
+document.addEventListener('pointerdown', e => { if (!e.target.closest('.btn.armed')) disarmAll(); }, true);
 const selectedIds = () => [...state.selected];
 
 function patchItems(updated) {
@@ -154,7 +174,6 @@ function dropItems(ids) {
 
 async function deleteIds(ids) {
   if (!ids.length) return;
-  if (!confirm(`${ids.length}개를 NAS에서 완전히 삭제할까요?`)) return;
   try { await api('/api/media/delete', { method: 'POST', body: { ids } }); dropItems(ids); exitSelect(); toast(`${ids.length}개 삭제함`); loadCats(); }
   catch (e) { fail(e); }
 }
@@ -218,7 +237,7 @@ function renderViewer() {
     <div class="row"><button class="btn sm" onclick="openClassify([${m.id}])">분류</button>
     <button class="btn sm" onclick="toggleFav(${m.id})">${m.favorite ? '★ 즐겨찾기 해제' : '☆ 즐겨찾기'}</button>
     ${m.source_url ? `<a class="btn sm" href="${esc(m.source_url)}" target="_blank" rel="noopener">원본</a>` : ''}
-    <button class="btn sm danger" onclick="deleteFromViewer(${m.id})">삭제</button></div>`;
+    <button class="btn sm danger" onclick="twoTap(this, () => deleteFromViewer(${m.id}))">🗑 삭제</button></div>`;
 }
 async function toggleFav(id) {
   const m = [...state.items, ...state.feed].find(x => x.id === id); if (!m) return;
@@ -226,7 +245,6 @@ async function toggleFav(id) {
   patchItems([{ ...m, favorite: m.favorite ? 0 : 1 }]); renderViewer();
 }
 async function deleteFromViewer(id) {
-  if (!confirm('NAS에서 완전히 삭제할까요?')) return;
   try { await api('/api/media/delete', { method: 'POST', body: { ids: [id] } }); dropItems([id]); toast('삭제함'); state.viewerList[state.viewerIdx] ? renderViewer() : closeViewer(); }
   catch (e) { fail(e); }
 }

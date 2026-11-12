@@ -119,3 +119,11 @@ main { padding: 12px; max-width: 1400px; margin: 0 auto; }
 .hbar .b { background: var(--panel2); height: 8px; border-radius: 4px; overflow: hidden; }
 .hbar .b i { display: block; height: 100%; background: var(--accent); }
 .hbar .v { color: var(--sub); text-align: right; }
+
+/* two-tap delete (armed state) */
+.btn.armed { position: relative; overflow: hidden; background: var(--danger); border-color: var(--danger); color: #fff;
+  font-weight: 700; animation: arm-pop .18s ease-out; }
+.btn.armed::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255,255,255,.8);
+  transform-origin: left; animation: arm-drain 3s linear forwards; }
+@keyframes arm-pop { from { transform: scale(.92); } 60% { transform: scale(1.06); } to { transform: scale(1); } }
+@keyframes arm-drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }

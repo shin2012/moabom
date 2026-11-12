@@ -70,7 +70,7 @@ struct RootView: View {
 
 struct MainTabs: View {
     @EnvironmentObject var store: Store
-    @SceneStorage("tab") private var tab = "feed"
+    @State private var tab = "library"   // 앱은 항상 보관함에서 시작
 
     var body: some View {
         TabView(selection: $tab) {
