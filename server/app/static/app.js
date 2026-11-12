@@ -143,14 +143,14 @@ const ARM_MS = 3000;
 function disarm(btn) {
   if (!btn.classList.contains('armed')) return;
   clearTimeout(btn._armT); btn.classList.remove('armed');
-  btn.innerHTML = btn.dataset.idle; btn.style.minWidth = '';
+  btn.innerHTML = btn.dataset.idle; btn.style.width = '';
 }
 function disarmAll() { $$('.btn.armed').forEach(disarm); }
-function twoTap(btn, run, label = '한 번 더 눌러 삭제') {
+function twoTap(btn, run, label = '한 번 더') {
   if (btn.classList.contains('armed')) { disarm(btn); run(); return; }
   disarmAll();
   btn.dataset.idle = btn.innerHTML;
-  btn.style.minWidth = btn.offsetWidth + 'px';
+  btn.style.width = btn.offsetWidth + 'px';  // keep size so the 2nd tap lands on the same spot
   btn.innerHTML = `<span>${label}</span>`;
   btn.classList.add('armed');
   btn._armT = setTimeout(() => disarm(btn), ARM_MS);

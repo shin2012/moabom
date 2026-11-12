@@ -127,3 +127,4 @@ main { padding: 12px; max-width: 1400px; margin: 0 auto; }
   transform-origin: left; animation: arm-drain 3s linear forwards; }
 @keyframes arm-pop { from { transform: scale(.92); } 60% { transform: scale(1.06); } to { transform: scale(1); } }
 @keyframes arm-drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+.btn.armed span { display: block; overflow: hidden; text-overflow: clip; }
