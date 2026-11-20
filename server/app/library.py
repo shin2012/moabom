@@ -35,6 +35,11 @@ def safe_folder(name: str) -> str:
     return name[:80]
 
 
+def category_key(name: str) -> str:
+    """Names that differ only by case, spaces or separators (`_`, `,`, `·`, `-`, `/`) are the same category."""
+    return re.sub(r"[\s_,·/\-]+", "", (name or "").lower())
+
+
 def media_kind(ext: str) -> str | None:
     ext = ext.lower()
     if ext in config.VIDEO_EXTS:
@@ -344,7 +349,10 @@ async def reconcile() -> dict:
             await conn.commit()
         if any(stats.values()):
             logger.info(f"reconcile: {stats}")
-        return stats
+    merged = await merge_lookalike_categories()
+    if merged:
+        stats["merged_categories"] = len(merged)
+    return stats
 
 
 async def index_files(abs_paths: list[str], meta: dict) -> list[int]:
@@ -518,8 +526,9 @@ async def create_category(axis: int, name: str) -> dict:
         raise ValueError("사용할 수 없는 이름입니다")
     async with lock:
         async with db.connect() as conn:
-            cur = await conn.execute("SELECT id FROM categories WHERE axis = ? AND folder = ? AND deleted = 0", (axis, folder))
-            if await cur.fetchone():
+            catrows = await load_categories(conn)
+            if any(c["axis"] == axis and (c["folder"] == folder or category_key(c["name"]) == category_key(name))
+                   for c in catrows.values()):
                 raise ValueError("같은 이름의 분류가 이미 있습니다")
             cur = await conn.execute("SELECT COALESCE(MAX(sort), 0) + 1 AS s FROM categories WHERE axis = ?", (axis,))
             sort = (await cur.fetchone())["s"]
@@ -544,7 +553,8 @@ async def rename_category(cid: int, name: str) -> int:
             if cid not in catrows:
                 raise ValueError("분류를 찾을 수 없습니다")
             axis = catrows[cid]["axis"]
-            clash = [c for c in catrows.values() if c["axis"] == axis and c["folder"] == folder and c["id"] != cid]
+            clash = [c for c in catrows.values() if c["axis"] == axis and c["id"] != cid and
+                     (c["folder"] == folder or category_key(c["name"]) == category_key(name))]
             if clash:
                 raise ValueError("같은 이름의 분류가 이미 있습니다. 합치기를 사용하세요")
             await conn.execute("UPDATE categories SET name = ?, folder = ?, rev = ? WHERE id = ?",
@@ -573,8 +583,36 @@ async def merge_category(src: int, dst: int) -> int:
                 await _relocate(conn, row, new, catrows)
             await conn.execute("UPDATE categories SET deleted = 1, rev = ? WHERE id = ?", (await db.next_revs(conn), src))
             await conn.execute("UPDATE downloads SET " + key + " = ? WHERE " + key + " = ?", (dst, src))
+            await conn.execute("UPDATE settings SET value = ? WHERE key = ? AND value = ?", (str(dst), "default_" + key, str(src)))
             await conn.commit()
             return len(rows)
+
+
+async def merge_lookalike_categories() -> list[tuple[str, str]]:
+    """Merge categories on the same axis whose names differ only by separators (e.g. `A_B` vs `A, B`).
+    The one holding more items survives; files are moved into its folder."""
+    async with db.connect() as conn:
+        catrows = await load_categories(conn)
+        cur = await conn.execute("SELECT c1, c2, c3 FROM media WHERE deleted = 0")
+        counts: dict[int, int] = {}
+        for row in await cur.fetchall():
+            for k in AXIS_KEYS:
+                if row[k]:
+                    counts[row[k]] = counts.get(row[k], 0) + 1
+    groups: dict[tuple[int, str], list[dict]] = {}
+    for c in catrows.values():
+        groups.setdefault((c["axis"], category_key(c["name"])), []).append(c)
+    merged = []
+    for cats in groups.values():
+        if len(cats) < 2:
+            continue
+        cats.sort(key=lambda c: (-counts.get(c["id"], 0), c["id"]))
+        keep = cats[0]
+        for extra in cats[1:]:
+            await merge_category(extra["id"], keep["id"])
+            merged.append((extra["name"], keep["name"]))
+            logger.info(f"merged lookalike category {extra['name']!r} -> {keep['name']!r}")
+    return merged
 
 
 async def delete_category(cid: int) -> int:

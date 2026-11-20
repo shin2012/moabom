@@ -55,3 +55,18 @@ async def test_migration_merges_case_duplicates(env):
     await db.init_db()
     rows = await db.get_watched()
     assert [(r["username"], r["last_tweet_id"]) for r in rows] == [("dup", "90")]
+
+
+@pytest.mark.asyncio
+async def test_lookalike_categories_are_merged_and_blocked(client, env):
+    from tests.conftest import make
+    make(env, "Alpha, Beta/a_20260101000000_001.jpg", b"1")
+    make(env, "Alpha, Beta/b_20260101000000_001.jpg", b"2")
+    make(env, "Alpha_Beta/c_20260101000000_001.jpg", b"3")
+    await client.post("/api/library/rescan")
+    cats = (await client.get("/api/categories")).json()["items"]
+    assert [(c["name"], c["count"]) for c in cats] == [("Alpha, Beta", 3)]
+    assert (env / "Alpha, Beta/c_20260101000000_001.jpg").exists() and not (env / "Alpha_Beta").exists()
+    assert (await client.post("/api/categories", json={"axis": 1, "name": "alpha_beta"})).status_code == 400
+    other = (await client.post("/api/categories", json={"axis": 1, "name": "Gamma"})).json()["category"]
+    assert (await client.patch(f"/api/categories/{other['id']}", json={"name": "Alpha · Beta"})).status_code == 400
