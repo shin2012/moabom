@@ -153,6 +153,9 @@ async def init_db():
                          ("status_checked_at", "TEXT")):
             if col not in wcols:
                 await conn.execute(f"ALTER TABLE watched ADD COLUMN {col} {ddl}")
+        await _merge_watched_case_duplicates(conn)
+        await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_watched_nocase ON watched(username COLLATE NOCASE)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_downloaded_tweet ON downloaded_urls(tweet_id)")
         # Instagram support was removed.
         await conn.execute("DELETE FROM watched WHERE platform = 'instagram'")
         await conn.execute("DELETE FROM settings WHERE key IN ('ig_logged_in')")
@@ -255,15 +258,23 @@ async def delete_downloads_by_status(status: str) -> int:
         return cur.rowcount
 
 
-async def is_url_downloaded(url: str) -> bool:
+async def is_url_downloaded(url: str, post_id: str | None = None) -> bool:
+    """X account names are case-insensitive, so the same post can arrive as x.com/Foo/... or x.com/foo/...
+    Match on the post id when known, otherwise on the URL ignoring case."""
     async with connect() as conn:
-        cur = await conn.execute("SELECT 1 FROM downloaded_urls WHERE url = ?", (url,))
+        if post_id:
+            cur = await conn.execute("SELECT 1 FROM downloaded_urls WHERE tweet_id = ? OR url = ? COLLATE NOCASE LIMIT 1",
+                                     (post_id, url))
+        else:
+            cur = await conn.execute("SELECT 1 FROM downloaded_urls WHERE url = ? COLLATE NOCASE LIMIT 1", (url,))
         return await cur.fetchone() is not None
 
 
-async def is_url_in_queue(url: str) -> bool:
+async def is_url_in_queue(url: str, post_id: str | None = None) -> bool:
     async with connect() as conn:
-        cur = await conn.execute("SELECT 1 FROM downloads WHERE url = ? AND status IN ('queued', 'downloading')", (url,))
+        cur = await conn.execute("SELECT 1 FROM downloads WHERE status IN ('queued', 'downloading') AND "
+                                 "(url = ? COLLATE NOCASE OR (? IS NOT NULL AND tweet_id = ?)) LIMIT 1",
+                                 (url, post_id, post_id))
         return await cur.fetchone() is not None
 
 
@@ -275,17 +286,50 @@ async def mark_url_downloaded(url: str, tweet_id: str | None, username: str):
 
 
 # ─── watched accounts (X only) ───
-async def add_watched(username: str, interval_minutes: int):
+async def find_watched(username: str) -> dict | None:
     async with connect() as conn:
-        await conn.execute("INSERT OR REPLACE INTO watched (username, interval_minutes, enabled, platform) "
+        cur = await conn.execute("SELECT * FROM watched WHERE username = ? COLLATE NOCASE", (username,))
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
+
+async def add_watched(username: str, interval_minutes: int) -> tuple[str, bool]:
+    """Adds an account (names are case-insensitive). Returns (stored name, already_existed)."""
+    async with connect() as conn:
+        cur = await conn.execute("SELECT username FROM watched WHERE username = ? COLLATE NOCASE", (username,))
+        row = await cur.fetchone()
+        if row:
+            await conn.execute("UPDATE watched SET interval_minutes = ?, enabled = 1 WHERE username = ?",
+                               (interval_minutes, row["username"]))
+            await conn.commit()
+            return row["username"], True
+        await conn.execute("INSERT INTO watched (username, interval_minutes, enabled, platform) "
                            "VALUES (?, ?, 1, 'twitter')", (username, interval_minutes))
         await conn.commit()
+        return username, False
 
 
 async def remove_watched(username: str):
     async with connect() as conn:
-        await conn.execute("DELETE FROM watched WHERE username = ?", (username,))
+        await conn.execute("DELETE FROM watched WHERE username = ? COLLATE NOCASE", (username,))
         await conn.commit()
+
+
+async def _merge_watched_case_duplicates(conn) -> int:
+    """Collapse watched rows whose names differ only by case (keeps the most advanced cursor)."""
+    cur = await conn.execute("SELECT * FROM watched ORDER BY username")
+    groups: dict[str, list[dict]] = {}
+    for r in await cur.fetchall():
+        groups.setdefault(r["username"].lower(), []).append(dict(r))
+    removed = 0
+    for rows in groups.values():
+        if len(rows) < 2:
+            continue
+        rows.sort(key=lambda r: (int(r["last_tweet_id"] or 0), r["last_checked"] or ""), reverse=True)
+        for extra in rows[1:]:
+            await conn.execute("DELETE FROM watched WHERE username = ?", (extra["username"],))
+            removed += 1
+    return removed
 
 
 async def get_watched():
@@ -297,17 +341,17 @@ async def get_watched():
 async def update_watched_last_checked(username: str, last_tweet_id: str | None = None):
     async with connect() as conn:
         if last_tweet_id:
-            await conn.execute("UPDATE watched SET last_checked = ?, last_tweet_id = ? WHERE username = ?",
+            await conn.execute("UPDATE watched SET last_checked = ?, last_tweet_id = ? WHERE username = ? COLLATE NOCASE",
                                (datetime.now().isoformat(), last_tweet_id, username))
         else:
-            await conn.execute("UPDATE watched SET last_checked = ? WHERE username = ?",
+            await conn.execute("UPDATE watched SET last_checked = ? WHERE username = ? COLLATE NOCASE",
                                (datetime.now().isoformat(), username))
         await conn.commit()
 
 
 async def update_account_status(username: str, status: str):
     async with connect() as conn:
-        await conn.execute("UPDATE watched SET account_status = ?, status_checked_at = ? WHERE username = ?",
+        await conn.execute("UPDATE watched SET account_status = ?, status_checked_at = ? WHERE username = ? COLLATE NOCASE",
                            (status, datetime.now().isoformat(), username))
         await conn.commit()
 

@@ -21,18 +21,30 @@ class WatchReq(BaseModel):
 
 @router.post("/api/watch")
 async def add_watch(req: WatchReq):
-    username = req.username.strip().lstrip("@")
-    m = re.match(r"^(?:https?://(?:www\.)?(?:x|twitter)\.com/)?([A-Za-z0-9_]{1,15})/?$", username)
-    if not m:
+    username = parse_watch_target(req.username)
+    if not username:
         raise HTTPException(400, "올바른 X 계정 이름이 아닙니다")
-    username = m.group(1)
-    await db.add_watched(username, req.interval_minutes)
+    username, already = await db.add_watched(username, req.interval_minutes)
+    if already:
+        return {"ok": True, "username": username, "already": True}
     if req.from_now:
         posts = await list_user_media(username, limit=1)
         if posts:
             await db.update_watched_last_checked(username, posts[0]["id"])
     await db.add_log("감시 추가", f"@{username}")
-    return {"ok": True, "username": username}
+    return {"ok": True, "username": username, "already": False}
+
+
+_RESERVED = {"i", "home", "search", "explore", "notifications", "messages", "settings", "intent", "share", "hashtag"}
+
+
+def parse_watch_target(value: str) -> str | None:
+    """Accepts '@name', 'name', a profile link or a post link (x.com/name/status/123)."""
+    v = (value or "").strip().lstrip("@")
+    m = re.match(r"^(?:https?://(?:www\.|mobile\.)?(?:x|twitter)\.com/)?([A-Za-z0-9_]{1,15})(?:/(?:status|media|with_replies)\b[^\s]*)?/?(?:\?\S*)?$", v)
+    if not m or m.group(1).lower() in _RESERVED:
+        return None
+    return m.group(1)
 
 
 @router.get("/api/watch")
@@ -64,9 +76,10 @@ async def remove_watch(username: str):
 
 @router.post("/api/watch/{username}/run")
 async def run_watch(username: str):
-    acc = next((w for w in await db.get_watched() if w["username"] == username), None)
+    acc = await db.find_watched(username)
     if not acc:
         raise HTTPException(404, "감시 계정을 찾을 수 없습니다")
+    username = acc["username"]
     n = await watcher.check_account(username, acc.get("last_tweet_id") or None, dlqueue.enqueue)
     await db.add_log("감시 실행", f"@{username} → {n}건")
     return {"ok": True, "new_downloads": n}

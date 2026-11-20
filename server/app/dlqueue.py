@@ -13,12 +13,13 @@ queue: asyncio.Queue = asyncio.Queue()
 
 async def enqueue(url: str, cats: dict | None = None, source: str = "manual", watched_by: str | None = None) -> int:
     url = normalize_url(url)
-    valid, username, post_id, _ = validate_url(url)
+    valid, username, post_id, platform = validate_url(url)
     if not valid:
         raise ValueError("올바른 링크가 아닙니다")
-    if await db.is_url_downloaded(url):
+    pid = post_id if platform == "x" else None
+    if await db.is_url_downloaded(url, pid):
         raise ValueError("이미 받은 링크입니다")
-    if await db.is_url_in_queue(url):
+    if await db.is_url_in_queue(url, pid):
         raise ValueError("이미 대기 중인 링크입니다")
     cats = {k: (cats or {}).get(k) for k in library.AXIS_KEYS}
     did = await db.add_download(url, post_id, username or "unknown", cats, source, watched_by)

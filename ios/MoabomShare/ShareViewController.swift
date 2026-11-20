@@ -24,9 +24,40 @@ final class ShareModel: ObservableObject {
     @Published var cats: ShareCategories?
     @Published var picks: [Int: Int?] = [:]
     @Published var state: State = .idle
+    @Published var watchState: WatchState = .idle
     var close: () -> Void = {}
 
     enum State: Equatable { case idle, sending, done, failed(String) }
+    enum WatchState: Equatable { case idle, sending, added(String), already(String), failed(String) }
+
+    /// X account behind the shared link (x.com/<name>/status/... or a profile link).
+    var account: String? {
+        guard let u = URL(string: url), let host = u.host?.lowercased(),
+              ["x.com", "twitter.com", "www.x.com", "www.twitter.com", "mobile.twitter.com", "mobile.x.com"].contains(host)
+        else { return nil }
+        let parts = u.path.split(separator: "/").map(String.init)
+        guard let first = parts.first,
+              first.range(of: "^[A-Za-z0-9_]{1,15}$", options: .regularExpression) != nil,
+              !["i", "home", "search", "explore", "notifications", "messages", "settings", "intent", "share", "hashtag"]
+                .contains(first.lowercased())
+        else { return nil }
+        return first
+    }
+
+    func addWatch() {
+        guard let name = account else { return }
+        watchState = .sending
+        Task {
+            do {
+                let data = try await HTTP.request("POST", "/api/watch", body: ["username": name, "from_now": true])
+                let obj = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+                let stored = obj["username"] as? String ?? name
+                watchState = (obj["already"] as? Bool ?? false) ? .already(stored) : .added(stored)
+            } catch {
+                watchState = .failed(error.localizedDescription)
+            }
+        }
+    }
 
     var loggedIn: Bool { SharedStore.token != nil }
 
@@ -89,6 +120,7 @@ struct ShareView: View {
                                               selected: model.picks[axis] ?? nil) { model.picks[axis] = $0 }
                                 }
                             }
+                            if let name = model.account { WatchRow(name: name, state: model.watchState) { model.addWatch() } }
                             if case .failed(let m) = model.state { Text(m).foregroundStyle(.red).font(.footnote) }
                         }
                         .padding(20)
@@ -111,5 +143,69 @@ struct ShareView: View {
             }
         }
         .preferredColorScheme(.dark)
+    }
+}
+
+/// "Add this account to auto-watch" option shown under the category chips.
+struct WatchRow: View {
+    let name: String
+    let state: ShareModel.WatchState
+    let action: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("자동감시").font(.subheadline.weight(.semibold))
+            Button(action: action) {
+                HStack(spacing: 10) {
+                    Image(systemName: icon).foregroundStyle(tint)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title).font(.body.weight(.medium)).foregroundStyle(.primary)
+                        Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if state == .sending { ProgressView() }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.08)))
+            }
+            .buttonStyle(.plain)
+            .disabled(disabled)
+        }
+    }
+
+    private var disabled: Bool {
+        switch state {
+        case .sending, .added, .already: return true
+        default: return false
+        }
+    }
+    private var icon: String {
+        switch state {
+        case .added, .already: return "checkmark.circle.fill"
+        case .failed: return "exclamationmark.circle"
+        default: return "eye.circle"
+        }
+    }
+    private var tint: Color {
+        switch state {
+        case .added, .already: return .green
+        case .failed: return .red
+        default: return .accentColor
+        }
+    }
+    private var title: String {
+        switch state {
+        case .added(let n): return "@\(n) 자동감시에 추가됨"
+        case .already(let n): return "@\(n) 이미 자동감시 중"
+        default: return "@\(name) 자동감시에 추가"
+        }
+    }
+    private var subtitle: String {
+        switch state {
+        case .failed(let m): return m
+        case .added, .already: return "새 게시물을 자동으로 받아요"
+        default: return "이 계정의 새 게시물을 앞으로 자동으로 받아요"
+        }
     }
 }

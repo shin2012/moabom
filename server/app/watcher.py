@@ -25,7 +25,7 @@ async def check_account(username: str, last_id: str | None, enqueue) -> int:
             continue
         if not newest or int(pid) > int(newest):
             newest = pid
-        if await db.is_url_downloaded(url):
+        if await db.is_url_downloaded(url, pid):
             continue
         try:
             await enqueue(url, None, "watch", username)
@@ -51,7 +51,7 @@ async def check_likes(enqueue) -> int:
             continue
         if not newest or int(pid) > int(newest):
             newest = pid
-        if await db.is_url_downloaded(url):
+        if await db.is_url_downloaded(url, pid):
             continue
         try:
             await enqueue(url, None, "likes", None)
