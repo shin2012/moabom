@@ -46,13 +46,23 @@ struct Chip: View {
 
     var body: some View {
         Button(action: action) {
-            Text(title)
-                .font(.subheadline.weight(selected ? .semibold : .regular))
-                .lineLimit(1)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .foregroundStyle(selected ? Color.black : (dimmed ? Color.secondary : Color.primary))
-                .background(selected ? Color.white : Color.white.opacity(0.12), in: Capsule())
+            // Adaptive colours: the share sheet runs in light mode, where the old
+            // white-on-white selected chip was invisible. primary/systemBackground
+            // keeps the dark look (white chip, black text) and inverts in light mode.
+            HStack(spacing: 4) {
+                if selected {
+                    Image(systemName: "checkmark").font(.caption.weight(.bold))
+                }
+                Text(title)
+                    .font(.subheadline.weight(selected ? .semibold : .regular))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .foregroundStyle(selected ? Color(uiColor: .systemBackground) : (dimmed ? Color.secondary : Color.primary))
+            .background(selected ? Color.primary : Color(uiColor: .tertiarySystemFill), in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.primary.opacity(selected ? 0 : 0.12), lineWidth: 1))
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .sensoryFeedback(.selection, trigger: selected)
