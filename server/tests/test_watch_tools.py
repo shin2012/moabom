@@ -26,6 +26,16 @@ async def test_cleanup_removes_only_unavailable(client, env, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_watch_list_newest_first(client, env, monkeypatch):
+    monkeypatch.setattr(misc_routes, "list_user_media", _no_posts)
+    for name in ("bbb", "aaa", "ccc"):
+        await client.post("/api/watch", json={"username": name})
+    await client.post("/api/watch", json={"username": "AAA"})  # re-adding keeps its original place
+    names = [w["username"] for w in (await client.get("/api/watch")).json()["watched"]]
+    assert names == ["ccc", "aaa", "bbb"]
+
+
+@pytest.mark.asyncio
 async def test_backfill_queues_whole_timeline(client, env, monkeypatch):
     monkeypatch.setattr(misc_routes, "list_user_media", _no_posts)
     await client.post("/api/watch", json={"username": "Full_Acc"})

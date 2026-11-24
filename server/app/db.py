@@ -334,7 +334,8 @@ async def _merge_watched_case_duplicates(conn) -> int:
 
 async def get_watched():
     async with connect() as conn:
-        cur = await conn.execute("SELECT * FROM watched WHERE enabled = 1 ORDER BY username COLLATE NOCASE")
+        # rowid = insertion order (add_watched updates existing rows in place) → newest first
+        cur = await conn.execute("SELECT * FROM watched WHERE enabled = 1 ORDER BY rowid DESC")
         return [dict(r) for r in await cur.fetchall()]
 
 

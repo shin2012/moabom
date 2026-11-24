@@ -25,10 +25,12 @@ final class ShareModel: ObservableObject {
     @Published var picks: [Int: Int?] = [:]
     @Published var state: State = .idle
     @Published var watchState: WatchState = .idle
+    /// Set right after an account is newly added → asks whether to fetch its whole video history.
+    @Published var askBackfill: String?
     var close: () -> Void = {}
 
     enum State: Equatable { case idle, sending, done, failed(String) }
-    enum WatchState: Equatable { case idle, sending, added(String), already(String), failed(String) }
+    enum WatchState: Equatable { case idle, sending, added(String), already(String), backfilling(String), failed(String) }
 
     /// X account behind the shared link (x.com/<name>/status/... or a profile link).
     var account: String? {
@@ -52,7 +54,23 @@ final class ShareModel: ObservableObject {
                 let data = try await HTTP.request("POST", "/api/watch", body: ["username": name, "from_now": true])
                 let obj = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
                 let stored = obj["username"] as? String ?? name
-                watchState = (obj["already"] as? Bool ?? false) ? .already(stored) : .added(stored)
+                if obj["already"] as? Bool ?? false {
+                    watchState = .already(stored)
+                } else {
+                    watchState = .added(stored)
+                    askBackfill = stored
+                }
+            } catch {
+                watchState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    func startBackfill(_ name: String) {
+        Task {
+            do {
+                _ = try await HTTP.request("POST", "/api/watch/\(name)/all", body: ["videos_only": true])
+                watchState = .backfilling(name)
             } catch {
                 watchState = .failed(error.localizedDescription)
             }
@@ -127,6 +145,16 @@ struct ShareView: View {
                     }
                 }
             }
+            .alert("영상 전체 받기", isPresented: Binding(get: { model.askBackfill != nil },
+                                                      set: { if !$0 { model.askBackfill = nil } })) {
+                Button("취소", role: .cancel) { model.askBackfill = nil }
+                Button("확인") {
+                    if let n = model.askBackfill { model.startBackfill(n) }
+                    model.askBackfill = nil
+                }
+            } message: {
+                Text("@\(model.askBackfill ?? "")의 지금까지 올라온 영상을 모두 받을까요? 이미 받은 게시물은 건너뛰어요.")
+            }
             .navigationTitle("모아봄에 받기")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -176,27 +204,27 @@ struct WatchRow: View {
 
     private var disabled: Bool {
         switch state {
-        case .sending, .added, .already: return true
+        case .sending, .added, .already, .backfilling: return true
         default: return false
         }
     }
     private var icon: String {
         switch state {
-        case .added, .already: return "checkmark.circle.fill"
+        case .added, .already, .backfilling: return "checkmark.circle.fill"
         case .failed: return "exclamationmark.circle"
         default: return "eye.circle"
         }
     }
     private var tint: Color {
         switch state {
-        case .added, .already: return .green
+        case .added, .already, .backfilling: return .green
         case .failed: return .red
         default: return .accentColor
         }
     }
     private var title: String {
         switch state {
-        case .added(let n): return "@\(n) 자동감시에 추가됨"
+        case .added(let n), .backfilling(let n): return "@\(n) 자동감시에 추가됨"
         case .already(let n): return "@\(n) 이미 자동감시 중"
         default: return "@\(name) 자동감시에 추가"
         }
@@ -204,6 +232,7 @@ struct WatchRow: View {
     private var subtitle: String {
         switch state {
         case .failed(let m): return m
+        case .backfilling: return "지금까지 올라온 영상도 전부 받는 중이에요"
         case .added, .already: return "새 게시물을 자동으로 받아요"
         default: return "이 계정의 새 게시물을 앞으로 자동으로 받아요"
         }
