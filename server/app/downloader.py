@@ -210,29 +210,39 @@ async def download(url: str, out_dir: str, username: str, post_id: str, platform
         return False, [], str(e)
 
 
-async def _gallery_list(page_url: str, limit: int) -> list[dict]:
+async def _gallery_list(page_url: str, limit: int | None, timeout: int = 180) -> list[dict]:
+    """limit=None lists the whole timeline (slow for big accounts → pass a longer timeout)."""
     try:
-        code, out, _ = await _run(["gallery-dl", *_cookies_args(), "--no-download", "-j", "--range", f"1-{limit}",
-                                   page_url], 180)
+        rng = ["--range", f"1-{limit}"] if limit else []
+        code, out, _ = await _run(["gallery-dl", *_cookies_args(), "--no-download", "-j", *rng, page_url], timeout)
         return json.loads(out.decode("utf-8", "replace").strip()) if out else []
     except Exception as e:
         logger.error(f"gallery-dl list {page_url}: {e}")
         return []
 
 
-async def list_user_media(username: str, limit: int = 50) -> list[dict]:
-    """Recent media posts of an X account: [{url, id, title}] newest first."""
-    out, seen = [], set()
-    for entry in await _gallery_list(f"https://x.com/{username}/media", limit):
+def _is_video(meta: dict) -> bool:
+    return (meta.get("type") in ("video", "animated_gif")
+            or str(meta.get("extension") or "").lower() in ("mp4", "m3u8", "mov", "webm"))
+
+
+async def list_user_media(username: str, limit: int | None = 50, timeout: int = 180) -> list[dict]:
+    """Media posts of an X account: [{url, id, title, has_video}] newest first. limit=None = whole timeline."""
+    out, by_id = [], {}
+    for entry in await _gallery_list(f"https://x.com/{username}/media", limit, timeout):
         if not isinstance(entry, list) or len(entry) < 3 or entry[0] not in (1, 3):
             continue
         meta = entry[2] if isinstance(entry[2], dict) else {}
         tid = str(meta.get("tweet_id") or meta.get("conversation_id") or "")
-        if not tid or tid in seen:
+        if not tid:
             continue
-        seen.add(tid)
-        out.append({"url": f"https://x.com/{username}/status/{tid}", "id": tid,
-                    "title": (meta.get("content") or "")[:100]})
+        if tid in by_id:
+            by_id[tid]["has_video"] = by_id[tid]["has_video"] or _is_video(meta)
+            continue
+        item = {"url": f"https://x.com/{username}/status/{tid}", "id": tid,
+                "title": (meta.get("content") or "")[:100], "has_video": _is_video(meta)}
+        by_id[tid] = item
+        out.append(item)
     return out
 
 

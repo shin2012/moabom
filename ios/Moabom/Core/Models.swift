@@ -97,6 +97,16 @@ struct WatchedAccount: Decodable, Identifiable, Hashable {
     let accountStatus: String?
     let mediaCount: Int?
     let lastDownloadAt: String?
+    /// Present while a full-timeline download is being listed/queued on the server.
+    let backfill: Backfill?
+
+    struct Backfill: Decodable, Hashable {
+        let videosOnly: Bool
+        let listed: Int?
+        let queued: Int
+    }
+
+    var isUnavailable: Bool { ["suspended", "not_found", "unavailable"].contains(accountStatus ?? "") }
 }
 
 struct WatchResponse: Decodable { let watched: [WatchedAccount] }

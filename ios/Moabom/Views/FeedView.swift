@@ -7,8 +7,15 @@ struct FeedView: View {
     @AppStorage("feedMuted") private var muted = true
     @State private var feedAxis1: Int? = nil
     @State private var seed = UInt64.random(in: 1...UInt64.max - 1)
-    @State private var ids: [Int] = []
-    @State private var current: Int?
+    /// Feed rows. `uid` is unique per row so the same item may come back in a later batch.
+    @State private var entries: [FeedEntry] = []
+    @State private var current: Int?          // uid of the visible row
+    /// Full ordered list for the current mode; rows are appended from it in batches.
+    @State private var pool: [Int] = []
+    @State private var cursor = 0
+    @State private var nextUID = 0
+    @State private var loadingMore = false
+    private static let batch = 40
     @State private var classifyIDs: IDList?
     @State private var viewer: ViewerTarget?
 
@@ -20,7 +27,7 @@ struct FeedView: View {
     var body: some View {
         ZStack(alignment: .top) {
             Color.black.ignoresSafeArea()
-            if ids.isEmpty {
+            if entries.isEmpty {
                 VStack(spacing: 10) {
                     Image(systemName: "rectangle.stack").font(.largeTitle).foregroundStyle(.secondary)
                     Text(store.media.isEmpty ? (store.syncing ? "불러오는 중…" : "아직 받은 항목이 없어요") : "조건에 맞는 항목이 없어요")
@@ -30,13 +37,14 @@ struct FeedView: View {
             } else {
                 ScrollView(.vertical) {
                     LazyVStack(spacing: 0) {
-                        ForEach(ids, id: \.self) { id in
-                            if let m = store.media[id] {
-                                FeedPage(item: m, active: current == id, muted: $muted,
-                                         onClassify: { classifyIDs = IDList(ids: [id]) },
-                                         onExpand: { viewer = ViewerTarget(ids: ids, index: ids.firstIndex(of: id) ?? 0) })
+                        ForEach(entries) { e in
+                            if let m = store.media[e.mediaID] {
+                                FeedPage(item: m, active: current == e.uid, muted: $muted,
+                                         onClassify: { classifyIDs = IDList(ids: [e.mediaID]) },
+                                         onExpand: { openViewer(at: e) },
+                                         onDelete: { delete(e) })
                                     .containerRelativeFrame([.horizontal, .vertical])
-                                    .id(id)
+                                    .id(e.uid)
                             }
                         }
                     }
@@ -49,9 +57,9 @@ struct FeedView: View {
             }
             header
         }
-        .onAppear { if ids.isEmpty { rebuild() } }
-        .onChange(of: store.sortedNewest.count) { old, new in if ids.isEmpty || old == 0 { rebuild() } }
-        .onChange(of: current) { _, c in prefetch(after: c) }
+        .onAppear { if entries.isEmpty { rebuild() } }
+        .onChange(of: store.sortedNewest.count) { old, new in if entries.isEmpty || old == 0 { rebuild() } }
+        .onChange(of: current) { _, c in prefetch(after: c); loadMoreIfNeeded() }
         .sheet(item: $classifyIDs) { l in ClassifySheet(ids: l.ids).environmentObject(store) }
         .fullScreenCover(item: $viewer) { v in MediaViewer(ids: v.ids, index: v.index).environmentObject(store) }
     }
@@ -91,25 +99,93 @@ struct FeedView: View {
         return m
     }
 
-    private func rebuild() {
+    private var filter: LibraryFilter {
         var f = LibraryFilter()
         f.sort = mode == "random" ? .random : .newest
         f.seed = seed
         f.favoritesOnly = mode == "favorites"
         if mode == "unsorted" { f.cats = [.unsorted, .unsorted, .unsorted] }
         if let a = feedAxis1 { f.cats[0] = .id(a) }
-        ids = store.items(f).map(\.id)
-        current = ids.first
+        return f
     }
 
-    private func prefetch(after id: Int?) {
-        guard let id, let i = ids.firstIndex(of: id) else { return }
+    private func rebuild() {
+        pool = store.items(filter).map(\.id)
+        cursor = 0
+        entries = []
+        appendBatch()
+        current = entries.first?.uid
+    }
+
+    private func appendBatch() {
+        let slice = pool[min(cursor, pool.count)..<min(cursor + Self.batch, pool.count)]
+        cursor += slice.count
+        entries += slice.map { id in
+            nextUID += 1
+            return FeedEntry(uid: nextUID, mediaID: id)
+        }
+    }
+
+    /// Near the end of the loaded rows, add the next batch. When the whole list has been shown,
+    /// fetch new items from the server and start the next round (random mode reshuffles).
+    private func loadMoreIfNeeded() {
+        guard let c = current, let i = entries.firstIndex(where: { $0.uid == c }), i >= entries.count - 5,
+              !loadingMore else { return }
+        if cursor < pool.count { appendBatch(); return }
+        loadingMore = true
+        Task {
+            defer { loadingMore = false }
+            await store.sync()
+            if mode == "random" { seed = UInt64.random(in: 1...UInt64.max - 1) }
+            let recent = Set(entries.suffix(Self.batch).map(\.mediaID))
+            var next = store.items(filter).map(\.id)
+            // Don't repeat what was just on screen right at the seam.
+            let fresh = next.filter { !recent.contains($0) }
+            if !fresh.isEmpty { next = fresh + next.filter { recent.contains($0) } }
+            guard !next.isEmpty else { return }
+            pool = next
+            cursor = 0
+            appendBatch()
+        }
+    }
+
+    private func openViewer(at e: FeedEntry) {
+        // Viewer needs unique ids: the loaded rows without repeats, in feed order.
+        var seen = Set<Int>()
+        let list = entries.map(\.mediaID).filter { seen.insert($0).inserted }
+        viewer = ViewerTarget(ids: list, index: list.firstIndex(of: e.mediaID) ?? 0)
+    }
+
+    private func delete(_ e: FeedEntry) {
+        Task {
+            guard await store.delete([e.mediaID]) else { return }
+            // Move to the following row, then drop every row of that item.
+            if let i = entries.firstIndex(where: { $0.uid == e.uid }) {
+                let after = entries[(i + 1)...].first { $0.mediaID != e.mediaID }
+                    ?? entries[..<i].last { $0.mediaID != e.mediaID }
+                entries.removeAll { $0.mediaID == e.mediaID }
+                pool.removeAll { $0 == e.mediaID }
+                cursor = min(cursor, pool.count)
+                current = after?.uid
+                loadMoreIfNeeded()
+            }
+        }
+    }
+
+    private func prefetch(after uid: Int?) {
+        guard let uid, let i = entries.firstIndex(where: { $0.uid == uid }) else { return }
         for j in [i + 1, i + 2] {
-            guard let nid = ids[safe: j], let m = store.media[nid], m.isVideo else { continue }
+            guard let nid = entries[safe: j]?.mediaID, let m = store.media[nid], m.isVideo else { continue }
             let ext = (m.path as NSString).pathExtension.lowercased()
             Task.detached(priority: .utility) { await MediaCache.shared.fetchOriginal(id: nid, ext: ext) }
         }
     }
+}
+
+struct FeedEntry: Identifiable, Hashable {
+    let uid: Int
+    let mediaID: Int
+    var id: Int { uid }
 }
 
 struct ViewerTarget: Identifiable {
@@ -124,6 +200,7 @@ private struct FeedPage: View {
     @Binding var muted: Bool
     let onClassify: () -> Void
     let onExpand: () -> Void
+    let onDelete: () -> Void
     @EnvironmentObject var store: Store
     @StateObject private var player = LoopingPlayer()
     @State private var paused = false
@@ -197,6 +274,7 @@ private struct FeedPage: View {
                         sideButton(muted ? "speaker.slash.fill" : "speaker.wave.2.fill") { muted.toggle() }
                     }
                     sideButton("arrow.up.left.and.arrow.down.right") { onExpand() }
+                    ConfirmDeleteCircle(resetKey: item.id) { onDelete() }
                 }
             }
             .padding(.horizontal, 16)

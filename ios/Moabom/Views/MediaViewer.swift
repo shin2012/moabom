@@ -26,9 +26,12 @@ struct MediaViewer: View {
                         ForEach(ids, id: \.self) { id in
                             Group {
                                 if let m = store.media[id] {
-                                    ViewerPage(item: m, active: id == currentID)
+                                    ViewerPage(item: m, active: id == currentID, chrome: chrome, onTap: toggleChrome)
                                 } else {
                                     Text("삭제된 항목").foregroundStyle(.secondary)
+                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                        .contentShape(Rectangle())
+                                        .onTapGesture(perform: toggleChrome)
                                 }
                             }
                             .containerRelativeFrame([.horizontal, .vertical])
@@ -56,7 +59,6 @@ struct MediaViewer: View {
                                    withAnimation(.spring(duration: 0.25)) { dragY = 0 }
                                })
             )
-            .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { chrome.toggle() } }
 
             if chrome, let m = current {
                 VStack(spacing: 0) {
@@ -76,6 +78,12 @@ struct MediaViewer: View {
             if let id, let i = ids.firstIndex(of: id) { index = i; prefetch(around: i) }
         }
         .onAppear { prefetch(around: index) }
+    }
+
+    /// One tap anywhere on the media shows/hides every control (pages handle the tap themselves,
+    /// because the image's double-tap zoom would otherwise swallow it).
+    private func toggleChrome() {
+        withAnimation(.easeInOut(duration: 0.2)) { chrome.toggle() }
     }
 
     private var topBar: some View {
@@ -172,28 +180,91 @@ struct IDList: Identifiable {
 private struct ViewerPage: View {
     let item: MediaItem
     let active: Bool
+    let chrome: Bool
+    let onTap: () -> Void
     @StateObject private var player = LoopingPlayer()
+    @AppStorage("viewerMuted") private var muted = false
+    @State private var paused = false
+    @State private var scrubbing = false
+    @State private var wasPlaying = false
 
     var body: some View {
         Group {
             if item.isVideo {
                 ZStack {
                     ThumbView(id: item.id, width: 960, contentMode: .fit)
-                    if player.ready { SystemPlayerView(player: player.player) }
+                    // Plain layer (not AVPlayerViewController, which eats taps) so one tap toggles the UI.
+                    if player.ready { PlayerLayerView(player: player.player) }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onTap)
+                .overlay(alignment: .bottom) {
+                    if chrome && player.ready { controls.transition(.opacity) }
                 }
             } else {
-                ZoomableImage(item: item)
+                ZoomableImage(item: item, onSingleTap: onTap)
             }
         }
         .task(id: active) {
             guard item.isVideo else { return }
             if active {
                 await player.load(item, resume: true)
+                player.observeProgress()
+                player.player.isMuted = muted
+                paused = false
                 player.play()
             } else {
                 player.pause()
             }
         }
+        .onChange(of: muted) { _, m in player.player.isMuted = m }
         .onDisappear { player.stop() }
+    }
+
+    /// Play/pause, timeline (drag to seek), time and mute — shown with the rest of the UI.
+    private var controls: some View {
+        HStack(spacing: 12) {
+            Button {
+                paused.toggle()
+                paused ? player.pause() : player.play()
+            } label: {
+                Image(systemName: paused ? "play.fill" : "pause.fill").font(.title3).frame(width: 36, height: 36)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.25))
+                    Capsule().fill(.white).frame(width: max(0, geo.size.width * player.progress))
+                }
+                .frame(height: scrubbing ? 6 : 4)
+                .frame(maxHeight: .infinity, alignment: .center)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { v in
+                            if !scrubbing { wasPlaying = !paused; player.pause(); scrubbing = true }
+                            let f = min(1, max(0, v.location.x / max(1, geo.size.width)))
+                            player.scrub(to: f * player.knownDuration)
+                        }
+                        .onEnded { _ in
+                            scrubbing = false
+                            if wasPlaying { player.play() }
+                        }
+                )
+            }
+            .frame(height: 32)
+            Text("\(Fmt.duration(max(0.001, player.progress * player.knownDuration))) / \(Fmt.duration(player.knownDuration))")
+                .font(.caption.monospacedDigit())
+                .fixedSize()
+            Button { muted.toggle() } label: {
+                Image(systemName: muted ? "speaker.slash.fill" : "speaker.wave.2.fill").font(.body).frame(width: 36, height: 36)
+            }
+        }
+        .foregroundStyle(.white)
+        .buttonStyle(.plain)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 4)
+        .background(.black.opacity(0.35), in: Capsule())
+        .padding(.horizontal, 12)
+        .padding(.bottom, 190)
     }
 }

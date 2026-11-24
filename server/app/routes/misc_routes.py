@@ -63,7 +63,9 @@ async def list_watch():
             except ValueError:
                 pass
         c = counts.get(w["username"], {})
-        out.append({**w, "media_count": c.get("n", 0), "last_download_at": c.get("last"), "watcher_running": not overdue})
+        bf = watcher.backfills.get(w["username"].lower())
+        out.append({**w, "media_count": c.get("n", 0), "last_download_at": c.get("last"), "watcher_running": not overdue,
+                    "backfill": bf})
     return {"watched": out}
 
 
@@ -72,6 +74,42 @@ async def remove_watch(username: str):
     await db.remove_watched(username)
     await db.add_log("감시 삭제", f"@{username}")
     return {"ok": True}
+
+
+@router.post("/api/watch/cleanup")
+async def cleanup_watch():
+    """Stop watching every account X reports as suspended / not found / unavailable (files stay)."""
+    removed = [w["username"] for w in await db.get_watched()
+               if w.get("account_status") in watcher.UNAVAILABLE_STATUSES]
+    for u in removed:
+        await db.remove_watched(u)
+    if removed:
+        await db.add_log("감시 정리", f"이용 불가 {len(removed)}개 삭제: " + ", ".join("@" + u for u in removed))
+    return {"ok": True, "removed": removed}
+
+
+class BackfillReq(BaseModel):
+    videos_only: bool = True
+
+
+_backfill_tasks: set = set()
+
+
+@router.post("/api/watch/{username}/all")
+async def backfill_watch(username: str, req: BackfillReq | None = None):
+    """Start downloading the account's whole media timeline in the background."""
+    acc = await db.find_watched(username)
+    if not acc:
+        raise HTTPException(404, "감시 계정을 찾을 수 없습니다")
+    username = acc["username"]
+    if username.lower() in watcher.backfills:
+        return {"ok": True, "started": False, "running": True}
+    videos_only = (req or BackfillReq()).videos_only
+    t = asyncio.create_task(watcher.backfill_account(username, videos_only, dlqueue.enqueue))
+    _backfill_tasks.add(t)
+    t.add_done_callback(_backfill_tasks.discard)
+    await asyncio.sleep(0)
+    return {"ok": True, "started": True, "running": True}
 
 
 @router.post("/api/watch/{username}/run")

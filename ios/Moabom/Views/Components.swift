@@ -31,6 +31,8 @@ struct ThumbView: View {
 /// Full-size image from cache or server, with pinch zoom.
 struct ZoomableImage: View {
     let item: MediaItem
+    /// Single tap (waits for the double-tap zoom to fail first).
+    var onSingleTap: (() -> Void)? = nil
     @State private var image: UIImage?
     @State private var scale: CGFloat = 1
     @State private var lastScale: CGFloat = 1
@@ -69,6 +71,7 @@ struct ZoomableImage: View {
                 if scale > 1 { scale = 1; lastScale = 1; offset = .zero; lastOffset = .zero } else { scale = 2.5; lastScale = 2.5 }
             }
         }
+        .onTapGesture(count: 1) { onSingleTap?() }
         .task(id: item.id) {
             let ext = (item.path as NSString).pathExtension.lowercased()
             if let f = await MediaCache.shared.fetchOriginal(id: item.id, ext: ext), let img = UIImage(contentsOfFile: f.path) {
@@ -249,6 +252,61 @@ final class LoopingPlayer: ObservableObject {
     }
 }
 
+
+/// Round two-tap delete for the feed's side rail (same rule as ConfirmDeleteButton:
+/// first tap arms — red circle, draining ring, warning haptic — second tap within 3 s deletes).
+struct ConfirmDeleteCircle<Key: Equatable>: View {
+    let resetKey: Key
+    let action: () -> Void
+    @State private var armed = false
+    @State private var remaining: CGFloat = 1
+    @State private var token = 0
+    private let window: Double = 3
+
+    var body: some View {
+        Button {
+            if armed { disarm(); action() } else { arm() }
+        } label: {
+            Image(systemName: armed ? "trash.fill" : "trash")
+                .font(.title3)
+                .foregroundStyle(.white)
+                .frame(width: 46, height: 46)
+                .background(armed ? Color.red : Color.black.opacity(0.35), in: Circle())
+                .overlay {
+                    if armed {
+                        Circle().trim(from: 0, to: remaining)
+                            .stroke(.white.opacity(0.85), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                            .padding(2)
+                    }
+                }
+                .scaleEffect(armed ? 1.1 : 1)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(armed ? "한 번 더 누르면 삭제" : "삭제")
+        .sensoryFeedback(.warning, trigger: armed) { _, new in new }
+        .onChange(of: resetKey) { _, _ in disarm() }
+        .onDisappear { disarm() }
+    }
+
+    private func arm() {
+        token += 1
+        let t = token
+        remaining = 1
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) { armed = true }
+        withAnimation(.linear(duration: window)) { remaining = 0 }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(window))
+            if token == t { disarm() }
+        }
+    }
+
+    private func disarm() {
+        guard armed else { return }
+        token += 1
+        withAnimation(.easeOut(duration: 0.2)) { armed = false }
+    }
+}
 
 /// Two-tap delete: the first tap arms the button in place (red fill, draining
 /// timer bar, warning haptic); a second tap on the same spot within 3 s runs

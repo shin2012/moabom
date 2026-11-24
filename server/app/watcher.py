@@ -37,6 +37,43 @@ async def check_account(username: str, last_id: str | None, enqueue) -> int:
     return new
 
 
+UNAVAILABLE_STATUSES = ("suspended", "not_found", "unavailable")
+
+# accounts with a full-timeline backfill in progress → {"videos_only", "listed", "queued"}
+backfills: dict[str, dict] = {}
+
+
+async def backfill_account(username: str, videos_only: bool, enqueue) -> int:
+    """Queue every media post of the account (whole /media timeline), skipping ones already received."""
+    key = username.lower()
+    state = backfills[key] = {"videos_only": videos_only, "listed": None, "queued": 0}
+    try:
+        posts = await list_user_media(username, limit=None, timeout=1800)
+        state["listed"] = len(posts)
+        newest = None
+        for p in posts:
+            if not newest or int(p["id"]) > int(newest):
+                newest = p["id"]
+            if videos_only and not p.get("has_video"):
+                continue
+            if await db.is_url_downloaded(p["url"], p["id"]):
+                continue
+            try:
+                await enqueue(p["url"], None, "watch", username)
+                state["queued"] += 1
+            except ValueError:
+                pass
+        acc = await db.find_watched(username)
+        if newest and acc and (not acc.get("last_tweet_id") or int(newest) > int(acc["last_tweet_id"])):
+            await db.update_watched_last_checked(username, newest)
+        await db.add_log("전체 받기", f"@{username} {'영상만' if videos_only else '전체'} → {state['queued']}건 "
+                                    f"(게시물 {len(posts)}개 확인)")
+        logger.info(f"backfill @{username}: listed {len(posts)}, queued {state['queued']}")
+        return state["queued"]
+    finally:
+        backfills.pop(key, None)
+
+
 async def check_likes(enqueue) -> int:
     state = await db.get_likes_watch_state()
     x_user = await db.get_setting("x_username")

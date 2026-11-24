@@ -322,9 +322,14 @@ async function loadWatch() {
     $('#likesCard').innerHTML = `<div class="row"><div class="grow"><b>좋아요 감시</b>
       <div class="meta hint">${l.x_username ? '@' + esc(l.x_username) : '설정에서 X 계정 이름을 입력하세요'} ${l.last_checked ? '· 확인 ' + fmtTime(l.last_checked) : ''}</div></div>
       <button class="btn" onclick="likesToggle()">${l.enabled ? '끄기' : '켜기'}</button><button class="btn ghost" onclick="likesImport()">지금 가져오기</button></div>`;
-    $('#watchList').innerHTML = w.watched.map(a => `<div class="item"><div class="grow">
+    const gone = w.watched.filter(a => ['suspended', 'not_found', 'unavailable'].includes(a.account_status)).length;
+    $('#watchList').innerHTML = (gone ? `<div class="item"><div class="grow hint">이용 불가 계정 ${gone}개</div>
+      <button class="btn sm danger" onclick="twoTap(this, cleanupWatch)">모두 삭제</button></div>` : '') +
+      w.watched.map(a => `<div class="item"><div class="grow">
       <div class="title">@${esc(a.username)} <span class="badge ${a.account_status === 'active' ? 'ok' : ['suspended', 'not_found', 'unavailable'].includes(a.account_status) ? 'bad' : ''}">${{ active: '정상', suspended: '정지됨', not_found: '없음', unavailable: '이용 불가' }[a.account_status] || '확인 전'}</span></div>
-      <div class="meta">${a.media_count}개 · 마지막 받음 ${fmtTime(a.last_download_at) || '-'} · 확인 ${fmtTime(a.last_checked) || '-'}</div></div>
+      <div class="meta">${a.media_count}개 · 마지막 받음 ${fmtTime(a.last_download_at) || '-'} · 확인 ${fmtTime(a.last_checked) || '-'}${a.backfill ? ` · 전체 받기 ${a.backfill.listed == null ? '목록 읽는 중…' : a.backfill.queued + '개 추가'}` : ''}</div></div>
+      <button class="btn sm" ${a.backfill ? 'disabled' : ''} onclick="backfillWatch('${esc(a.username)}', true)">영상 전체 받기</button>
+      <button class="btn sm ghost" ${a.backfill ? 'disabled' : ''} onclick="backfillWatch('${esc(a.username)}', false)">사진·영상 전체</button>
       <button class="btn sm" onclick="runWatch('${esc(a.username)}')">지금 확인</button>
       <button class="btn sm danger" onclick="removeWatch('${esc(a.username)}')">삭제</button></div>`).join('') || '<div class="hint">감시 중인 계정이 없습니다</div>';
   } catch (e) { fail(e); }
@@ -332,6 +337,8 @@ async function loadWatch() {
 async function addWatch() { const u = $('#watchInput').value.trim(); if (!u) return; try { await api('/api/watch', { method: 'POST', body: { username: u } }); $('#watchInput').value = ''; loadWatch(); } catch (e) { fail(e); } }
 async function runWatch(u) { toast('확인 중…'); try { const r = await api(`/api/watch/${u}/run`, { method: 'POST' }); toast(`새 항목 ${r.new_downloads}개`); loadWatch(); } catch (e) { fail(e); } }
 async function removeWatch(u) { if (!confirm(`@${u} 감시를 멈출까요? (받은 파일은 남습니다)`)) return; try { await api('/api/watch/' + u, { method: 'DELETE' }); loadWatch(); } catch (e) { fail(e); } }
+async function cleanupWatch() { try { const r = await api('/api/watch/cleanup', { method: 'POST' }); toast(`이용 불가 계정 ${r.removed.length}개 삭제`); loadWatch(); } catch (e) { fail(e); } }
+async function backfillWatch(u, videosOnly) { try { const r = await api(`/api/watch/${u}/all`, { method: 'POST', body: { videos_only: videosOnly } }); toast(r.started ? '전체 받기를 시작했어요' : '이미 전체 받기 중이에요'); loadWatch(); } catch (e) { fail(e); } }
 async function likesToggle() { try { await api('/api/likes/watch', { method: 'POST' }); loadWatch(); } catch (e) { fail(e); } }
 async function likesImport() { toast('가져오는 중…'); try { const r = await api('/api/likes/import', { method: 'POST' }); toast(`${r.imported}개 추가`); } catch (e) { fail(e); } }
 

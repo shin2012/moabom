@@ -118,7 +118,12 @@ struct DownloadsView: View {
             }
         }
 
-        Section("감시 중 \(watched.count)") {
+        Section {
+            let gone = watched.filter(\.isUnavailable).count
+            if gone > 0 {
+                ConfirmDeleteButton(title: "이용 불가 계정 \(gone)개 모두 삭제", armedTitle: "한 번 더 탭하면 \(gone)개 삭제",
+                                    resetKey: gone) { cleanupUnavailable() }
+            }
             ForEach(watched) { w in
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
@@ -128,14 +133,32 @@ struct DownloadsView: View {
                         }
                         Text("\(w.mediaCount ?? 0)개 · 마지막 \(Fmt.date(w.lastDownloadAt).isEmpty ? "-" : Fmt.date(w.lastDownloadAt))")
                             .font(.caption).foregroundStyle(.secondary)
+                        if let b = w.backfill {
+                            Text(b.listed == nil ? "전체 받기 · 목록 읽는 중…" : "전체 받기 · \(b.queued)개 대기열에 추가")
+                                .font(.caption).foregroundStyle(.blue)
+                        }
                     }
                     Spacer()
+                    Menu {
+                        Button { backfill(w.username, videosOnly: true) } label: { Label("영상 전체 받기", systemImage: "film.stack") }
+                        Button { backfill(w.username, videosOnly: false) } label: { Label("사진·영상 전체 받기", systemImage: "photo.stack") }
+                    } label: { Image(systemName: "square.and.arrow.down.on.square") }
+                    .buttonStyle(.borderless)
+                    .disabled(w.backfill != nil)
                     Button { run(w.username) } label: { Image(systemName: "arrow.clockwise") }.buttonStyle(.borderless)
+                        .padding(.leading, 10)
                 }
                 .swipeActions {
                     Button("삭제", role: .destructive) { removeAccount(w.username) }
                 }
+                .swipeActions(edge: .leading) {
+                    Button("영상 전체") { backfill(w.username, videosOnly: true) }.tint(.blue)
+                }
             }
+        } header: {
+            Text("감시 중 \(watched.count)")
+        } footer: {
+            Text("계정 옆 받기 버튼으로 지금까지 올라온 영상을 전부 받을 수 있어요. 이미 받은 게시물은 건너뛰어요.")
         }
     }
 
@@ -192,6 +215,28 @@ struct DownloadsView: View {
         Task {
             try? await API.send("DELETE", "/api/watch/\(u)")
             await reload()
+        }
+    }
+
+    private func cleanupUnavailable() {
+        Task {
+            do {
+                let d = try await API.send("POST", "/api/watch/cleanup")
+                let n = ((try? JSONSerialization.jsonObject(with: d) as? [String: Any])?["removed"] as? [Any])?.count ?? 0
+                Toast.shared.show("이용 불가 계정 \(n)개를 삭제했어요")
+                await reload()
+            } catch { Toast.shared.show(error.localizedDescription) }
+        }
+    }
+
+    private func backfill(_ u: String, videosOnly: Bool) {
+        Task {
+            do {
+                let d = try await API.send("POST", "/api/watch/\(u)/all", body: ["videos_only": videosOnly])
+                let started = (try? JSONSerialization.jsonObject(with: d) as? [String: Any])?["started"] as? Bool ?? false
+                Toast.shared.show(started ? "@\(u) \(videosOnly ? "영상" : "사진·영상") 전체 받기를 시작했어요" : "이미 전체 받기 중이에요")
+                await reload()
+            } catch { Toast.shared.show(error.localizedDescription) }
         }
     }
 
